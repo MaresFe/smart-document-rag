@@ -7,3 +7,8 @@ psycopg[binary]
 alembic
 python-dotenv
 pgvector
+
+PyMuPDF
+python-docx
+pandas
+openpyxl
