@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     embedding_model_name: str = "intfloat/multilingual-e5-large"
     embedding_dimension: int = 1024
 
+    llm_provider: str = "ollama"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2:3b"
+    llm_timeout_seconds: int = 120
+
     allowed_file_extensions: set[str] = {
         "pdf",
         "docx",

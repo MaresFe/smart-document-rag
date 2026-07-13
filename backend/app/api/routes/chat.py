@@ -18,6 +18,7 @@ from app.schemas.chat import (
 from app.services.dev_user import DEV_USER_ID, get_or_create_dev_user
 from app.services.embedding import EmbeddingError
 from app.services.retrieval import RetrievedChunk, retrieve_relevant_chunks
+from app.services.llm import LLMError, generate_answer
 
 
 router = APIRouter(
@@ -158,9 +159,15 @@ def create_chat_message(
             detail=str(error),
         ) from error
 
-    assistant_content = build_retrieval_based_answer(
-        question=request.content,
-        retrieved_chunks=retrieved_chunks,
+    try:
+        assistant_content = generate_answer(
+            question=request.content,
+            retrieved_chunks=retrieved_chunks,
+        )
+    except LLMError:
+        assistant_content = build_retrieval_based_answer(
+            question=request.content,
+            retrieved_chunks=retrieved_chunks,
     )
 
     assistant_message = ChatMessage(

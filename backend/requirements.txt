@@ -12,3 +12,4 @@ PyMuPDF
 python-docx
 pandas
 openpyxlsentence-transformers
+httpx
