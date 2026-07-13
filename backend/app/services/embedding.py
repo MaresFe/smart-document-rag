@@ -36,3 +36,22 @@ def create_passage_embeddings(texts: list[str]) -> list[list[float]]:
 
     except Exception as error:
         raise EmbeddingError(f"Embeddings could not be created: {error}") from error
+
+
+def create_query_embedding(query: str) -> list[float]:
+    if not query.strip():
+        raise EmbeddingError("Query cannot be empty.")
+
+    try:
+        model = get_embedding_model()
+
+        embedding = model.encode(
+            f"query: {query}",
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+
+        return embedding.tolist()
+
+    except Exception as error:
+        raise EmbeddingError(f"Query embedding could not be created: {error}") from error
