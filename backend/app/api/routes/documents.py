@@ -12,6 +12,7 @@ from app.schemas.document_chunk import DocumentChunkRead
 from app.services.chunking import chunk_text
 from app.services.dev_user import DEV_USER_ID, get_or_create_dev_user
 from app.services.document_upload import save_upload_file
+from app.services.embedding import EmbeddingError, create_passage_embeddings
 from app.services.text_extraction import TextExtractionError, extract_text_from_document
 
 
@@ -60,11 +61,14 @@ def upload_document(
         if not chunks:
             raise TextExtractionError("No extractable text found in document.")
 
+        embeddings = create_passage_embeddings(chunks)
+
         document_chunks = [
             DocumentChunk(
                 document_id=document.id,
                 chunk_index=index,
                 content=chunk,
+                embedding=embeddings[index],
                 source_metadata={
                     "file_type": document.file_type,
                     "original_filename": document.original_filename,
@@ -81,7 +85,7 @@ def upload_document(
         db.commit()
         db.refresh(document)
 
-    except TextExtractionError as error:
+    except (TextExtractionError, EmbeddingError) as error:
         document.status = "failed"
         document.error_message = str(error)
 

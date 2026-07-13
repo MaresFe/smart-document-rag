@@ -11,4 +11,4 @@ pgvector
 PyMuPDF
 python-docx
 pandas
-openpyxl
+openpyxlsentence-transformers

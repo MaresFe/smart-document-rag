@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -18,6 +19,9 @@ class Settings(BaseSettings):
     upload_dir: Path = PROJECT_ROOT / "uploads"
     max_upload_size_mb: int = 25
 
+    embedding_model_name: str = "intfloat/multilingual-e5-large"
+    embedding_dimension: int = 1024
+
     allowed_file_extensions: set[str] = {
         "pdf",
         "docx",
@@ -27,7 +31,7 @@ class Settings(BaseSettings):
     }
 
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
     )
