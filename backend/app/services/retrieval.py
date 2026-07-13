@@ -1,0 +1,61 @@
+from dataclasses import dataclass
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
+from app.services.embedding import create_query_embedding
+
+
+@dataclass
+class RetrievedChunk:
+    document_id: UUID
+    chunk_id: UUID
+    chunk_index: int
+    content: str
+    similarity_score: float
+    original_filename: str | None
+
+
+def retrieve_relevant_chunks(
+    db: Session,
+    query: str,
+    limit: int = 5,
+) -> list[RetrievedChunk]:
+    query_embedding = create_query_embedding(query)
+
+    distance = DocumentChunk.embedding.cosine_distance(query_embedding)
+
+    statement = (
+        select(
+            DocumentChunk,
+            Document.original_filename,
+            distance.label("distance"),
+        )
+        .join(Document, Document.id == DocumentChunk.document_id)
+        .where(DocumentChunk.embedding.is_not(None))
+        .order_by(distance)
+        .limit(limit)
+    )
+
+    rows = db.execute(statement).all()
+
+    results: list[RetrievedChunk] = []
+
+    for chunk, original_filename, chunk_distance in rows:
+        similarity_score = 1 - float(chunk_distance)
+
+        results.append(
+            RetrievedChunk(
+                document_id=chunk.document_id,
+                chunk_id=chunk.id,
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                similarity_score=similarity_score,
+                original_filename=original_filename,
+            )
+        )
+
+    return results
