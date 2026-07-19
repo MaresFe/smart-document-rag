@@ -99,3 +99,9 @@ class Document(Base):
         back_populates="document",
         cascade="all, delete-orphan",
     )
+
+    chat_session_links = relationship(
+        "ChatSessionDocument",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )

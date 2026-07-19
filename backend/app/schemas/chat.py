@@ -44,3 +44,15 @@ class ChatResponse(BaseModel):
     user_message: ChatMessageRead
     assistant_message: ChatMessageRead
     sources: list[ChatSourceRead]
+
+class ChatSessionDocumentCreate(BaseModel):
+    document_ids: list[UUID] = Field(min_length=1)
+
+
+class ChatSessionDocumentRead(BaseModel):
+    id: UUID
+    session_id: UUID
+    document_id: UUID
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

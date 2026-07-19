@@ -6,12 +6,16 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.chat import ChatMessage, ChatSession
+from app.models.chat_session_document import ChatSessionDocument
+from app.models.document import Document
 from app.models.message_source import MessageSource
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageRead,
     ChatResponse,
     ChatSessionCreate,
+    ChatSessionDocumentCreate,
+    ChatSessionDocumentRead,
     ChatSessionRead,
     ChatSourceRead,
 )
@@ -78,6 +82,86 @@ def create_chat_session(
     db.refresh(session)
 
     return session
+
+@router.post(
+    "/sessions/{session_id}/documents",
+    response_model=list[ChatSessionDocumentRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def attach_documents_to_chat_session(
+    session_id: UUID,
+    request: ChatSessionDocumentCreate,
+    db: Session = Depends(get_db),
+):
+    session = db.get(ChatSession, session_id)
+
+    if session is None or session.user_id != DEV_USER_ID:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found.",
+        )
+
+    unique_document_ids = list(dict.fromkeys(request.document_ids))
+
+    statement = select(Document).where(
+        Document.id.in_(unique_document_ids),
+        Document.user_id == DEV_USER_ID,
+    )
+
+    documents = db.execute(statement).scalars().all()
+    found_document_ids = {document.id for document in documents}
+
+    missing_document_ids = [
+        document_id
+        for document_id in unique_document_ids
+        if document_id not in found_document_ids
+    ]
+
+    if missing_document_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": "One or more documents were not found.",
+                "document_ids": [
+                    str(document_id)
+                    for document_id in missing_document_ids
+                ],
+            },
+        )
+
+    existing_statement = select(ChatSessionDocument).where(
+        ChatSessionDocument.session_id == session_id,
+        ChatSessionDocument.document_id.in_(unique_document_ids),
+    )
+
+    existing_links = db.execute(existing_statement).scalars().all()
+    existing_document_ids = {
+        link.document_id
+        for link in existing_links
+    }
+
+    new_links = [
+        ChatSessionDocument(
+            session_id=session_id,
+            document_id=document_id,
+        )
+        for document_id in unique_document_ids
+        if document_id not in existing_document_ids
+    ]
+
+    db.add_all(new_links)
+    db.commit()
+
+    final_statement = (
+        select(ChatSessionDocument)
+        .where(
+            ChatSessionDocument.session_id == session_id,
+            ChatSessionDocument.document_id.in_(unique_document_ids),
+        )
+        .order_by(ChatSessionDocument.created_at)
+    )
+
+    return db.execute(final_statement).scalars().all()
 
 
 @router.get("/sessions", response_model=list[ChatSessionRead])
@@ -147,11 +231,22 @@ def create_chat_message(
     db.add(user_message)
     db.flush()
 
+    linked_documents_statement = select(
+        ChatSessionDocument.document_id
+    ).where(
+        ChatSessionDocument.session_id == session.id
+    )
+
+    linked_document_ids = list(
+        db.execute(linked_documents_statement).scalars().all()
+    )
+
     try:
         retrieved_chunks = retrieve_relevant_chunks(
             db=db,
             query=request.content,
             limit=5,
+            document_ids=linked_document_ids,
         )
     except EmbeddingError as error:
         raise HTTPException(

@@ -23,7 +23,11 @@ def retrieve_relevant_chunks(
     db: Session,
     query: str,
     limit: int = 5,
+    document_ids: list[UUID] | None = None,
 ) -> list[RetrievedChunk]:
+    if document_ids is not None and not document_ids:
+        return []
+
     query_embedding = create_query_embedding(query)
 
     distance = DocumentChunk.embedding.cosine_distance(query_embedding)
@@ -35,10 +39,18 @@ def retrieve_relevant_chunks(
             distance.label("distance"),
         )
         .join(Document, Document.id == DocumentChunk.document_id)
-        .where(DocumentChunk.embedding.is_not(None))
-        .order_by(distance)
-        .limit(limit)
+        .where(
+            DocumentChunk.embedding.is_not(None),
+            Document.status == "ready",
+        )
     )
+
+    if document_ids is not None:
+        statement = statement.where(
+            DocumentChunk.document_id.in_(document_ids)
+        )
+
+    statement = statement.order_by(distance).limit(limit)
 
     rows = db.execute(statement).all()
 

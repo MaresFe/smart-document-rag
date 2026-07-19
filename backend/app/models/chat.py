@@ -46,6 +46,12 @@ class ChatSession(Base):
         cascade="all, delete-orphan",
     )
 
+    document_links = relationship(
+        "ChatSessionDocument",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
+
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
