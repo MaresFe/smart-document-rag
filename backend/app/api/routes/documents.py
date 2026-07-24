@@ -1,6 +1,15 @@
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -140,3 +149,32 @@ def list_document_chunks(
     chunks = db.execute(statement).scalars().all()
 
     return chunks
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_document(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+):
+    document = db.get(Document, document_id)
+
+    if document is None or document.user_id != DEV_USER_ID:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    storage_path = Path(document.storage_path)
+
+    db.delete(document)
+    db.commit()
+
+    try:
+        storage_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+    )

@@ -6,7 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ChatSessionCreate(BaseModel):
     title: str | None = None
-
+class ChatSessionUpdate(BaseModel):
+    title: str = Field(
+        min_length=1,
+        max_length=120,
+    )
 
 class ChatSessionRead(BaseModel):
     id: UUID

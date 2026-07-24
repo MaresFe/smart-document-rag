@@ -17,6 +17,7 @@ from app.schemas.chat import (
     ChatSessionDocumentCreate,
     ChatSessionDocumentRead,
     ChatSessionRead,
+    ChatSessionUpdate,
     ChatSourceRead,
 )
 from app.services.dev_user import DEV_USER_ID, get_or_create_dev_user
@@ -130,15 +131,21 @@ def attach_documents_to_chat_session(
         )
 
     existing_statement = select(ChatSessionDocument).where(
-        ChatSessionDocument.session_id == session_id,
-        ChatSessionDocument.document_id.in_(unique_document_ids),
+        ChatSessionDocument.session_id == session_id
     )
 
     existing_links = db.execute(existing_statement).scalars().all()
+
     existing_document_ids = {
         link.document_id
         for link in existing_links
     }
+
+    requested_document_ids = set(unique_document_ids)
+
+    for link in existing_links:
+        if link.document_id not in requested_document_ids:
+            db.delete(link)
 
     new_links = [
         ChatSessionDocument(
@@ -150,13 +157,13 @@ def attach_documents_to_chat_session(
     ]
 
     db.add_all(new_links)
+    db.flush()
     db.commit()
 
     final_statement = (
         select(ChatSessionDocument)
         .where(
-            ChatSessionDocument.session_id == session_id,
-            ChatSessionDocument.document_id.in_(unique_document_ids),
+            ChatSessionDocument.session_id == session_id
         )
         .order_by(ChatSessionDocument.created_at)
     )
@@ -176,6 +183,56 @@ def list_chat_sessions(db: Session = Depends(get_db)):
 
     return sessions
 
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=ChatSessionRead,
+)
+def update_chat_session(
+    session_id: UUID,
+    request: ChatSessionUpdate,
+    db: Session = Depends(get_db),
+):
+    session = db.get(ChatSession, session_id)
+
+    if session is None or session.user_id != DEV_USER_ID:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found.",
+        )
+
+    normalized_title = request.title.strip()
+
+    if not normalized_title:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Chat session title cannot be empty.",
+        )
+
+    session.title = normalized_title
+
+    db.commit()
+    db.refresh(session)
+
+    return session
+
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_chat_session(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+) -> None:
+    session = db.get(ChatSession, session_id)
+
+    if session is None or session.user_id != DEV_USER_ID:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found.",
+        )
+
+    db.delete(session)
+    db.commit()
 
 @router.get(
     "/sessions/{session_id}/messages",
