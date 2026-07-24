@@ -5,10 +5,23 @@ import {
   FileSearch,
   Lightbulb,
   ListChecks,
+  LoaderCircle,
   MessageSquareText,
   Paperclip,
   Sparkles,
 } from "lucide-react";
+
+import type { ChatMessageRead } from "../types";
+
+interface ChatWorkspaceProps {
+  messages: ChatMessageRead[];
+  selectedDocumentCount: number;
+  loading: boolean;
+  sending: boolean;
+  error: string | null;
+  onSendMessage: (content: string) => Promise<void>;
+  onUploadClick: () => void;
+}
 
 const suggestions = [
   {
@@ -37,12 +50,22 @@ const suggestions = [
   },
 ];
 
-function ChatWorkspace() {
+function ChatWorkspace({
+  messages,
+  selectedDocumentCount,
+  loading,
+  sending,
+  error,
+  onSendMessage,
+  onUploadClick,
+}: ChatWorkspaceProps) {
   const [prompt, setPrompt] = useState("");
-  const [submittedPrompt, setSubmittedPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const canSubmit = prompt.trim().length > 0;
+  const canSubmit =
+    prompt.trim().length > 0 &&
+    selectedDocumentCount > 0 &&
+    !sending;
 
   function selectSuggestion(suggestionPrompt: string) {
     setPrompt(suggestionPrompt);
@@ -56,15 +79,20 @@ function ChatWorkspace() {
     });
   }
 
-  function submitPrompt() {
+  async function submitPrompt() {
     const normalizedPrompt = prompt.trim();
 
-    if (!normalizedPrompt) {
+    if (!normalizedPrompt || sending) {
       return;
     }
 
-    setSubmittedPrompt(normalizedPrompt);
+    if (selectedDocumentCount === 0) {
+      return;
+    }
+
     setPrompt("");
+
+    await onSendMessage(normalizedPrompt);
   }
 
   return (
@@ -79,13 +107,18 @@ function ChatWorkspace() {
           <h1>Belgelerinle konuş.</h1>
 
           <p className="chat-hero-description">
-            Seçili kaynaklar üzerinde semantik arama yap, özet çıkar ve
-            güvenilir yanıtları kaynaklarıyla birlikte incele.
+            Seçili kaynaklar üzerinde semantik arama yap, özet çıkar
+            ve güvenilir yanıtları kaynaklarıyla birlikte incele.
           </p>
         </div>
       </section>
 
-      {!submittedPrompt ? (
+      {loading ? (
+        <section className="chat-loading-state">
+          <LoaderCircle className="spinning-icon" size={24} />
+          <span>Sohbet geçmişi yükleniyor...</span>
+        </section>
+      ) : messages.length === 0 ? (
         <section className="suggestion-section">
           <div className="section-heading-row">
             <div>
@@ -98,7 +131,7 @@ function ChatWorkspace() {
 
             <span className="source-count-badge">
               <MessageSquareText size={14} />
-              2 kaynak seçili
+              {selectedDocumentCount} kaynak seçili
             </span>
           </div>
 
@@ -108,9 +141,12 @@ function ChatWorkspace() {
                 key={suggestion.id}
                 className="suggestion-card"
                 type="button"
+                disabled={selectedDocumentCount === 0}
                 onClick={() => selectSuggestion(suggestion.prompt)}
               >
-                <span className="suggestion-icon">{suggestion.icon}</span>
+                <span className="suggestion-icon">
+                  {suggestion.icon}
+                </span>
 
                 <span className="suggestion-copy">
                   <strong>{suggestion.title}</strong>
@@ -121,27 +157,61 @@ function ChatWorkspace() {
           </div>
         </section>
       ) : (
-        <section className="demo-conversation">
-          <div className="demo-user-message">
-            <span>Sen</span>
-            <p>{submittedPrompt}</p>
-          </div>
+        <section className="real-conversation">
+          {messages.map((message) =>
+            message.role === "user" ? (
+              <div
+                className="demo-user-message"
+                key={message.id}
+              >
+                <span>Sen</span>
+                <p>{message.content}</p>
+              </div>
+            ) : (
+              <div
+                className="demo-assistant-message"
+                key={message.id}
+              >
+                <div className="demo-assistant-avatar">
+                  <Sparkles size={18} />
+                </div>
 
-          <div className="demo-assistant-message">
-            <div className="demo-assistant-avatar">
-              <Sparkles size={18} />
+                <div>
+                  <span>Belge Asistanı</span>
+                  <p>{message.content}</p>
+                </div>
+              </div>
+            ),
+          )}
+
+          {sending && (
+            <div className="demo-assistant-message">
+              <div className="demo-assistant-avatar">
+                <LoaderCircle
+                  className="spinning-icon"
+                  size={18}
+                />
+              </div>
+
+              <div>
+                <span>Belge Asistanı</span>
+                <p>Belgeler inceleniyor ve yanıt hazırlanıyor...</p>
+              </div>
             </div>
-
-            <div>
-              <span>Belge Asistanı</span>
-
-              <p>
-                Backend bağlantısından sonra yanıt bu alanda, ilgili kaynak
-                referanslarıyla birlikte görüntülenecek.
-              </p>
-            </div>
-          </div>
+          )}
         </section>
+      )}
+
+      {error && (
+        <div className="chat-api-error" role="alert">
+          {error}
+        </div>
+      )}
+
+      {selectedDocumentCount === 0 && (
+        <div className="chat-selection-warning">
+          Mesaj göndermek için sol panelden en az bir hazır belge seç.
+        </div>
       )}
 
       <div className="chat-spacer" />
@@ -153,17 +223,19 @@ function ChatWorkspace() {
             value={prompt}
             aria-label="Belgeler hakkında soru sor"
             placeholder="Belgeler hakkında soru sor..."
-            rows={3}
+            rows={2}
+            disabled={sending}
             onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                (event.ctrlKey || event.metaKey)
-              ) {
-                event.preventDefault();
-                submitPrompt();
-              }
-            }}
+        onKeyDown={(event) => {
+  if (
+    event.key === "Enter" &&
+    !event.shiftKey &&
+    !event.nativeEvent.isComposing
+  ) {
+    event.preventDefault();
+    void submitPrompt();
+  }
+}}
           />
 
           <div className="composer-footer">
@@ -172,14 +244,17 @@ function ChatWorkspace() {
               type="button"
               aria-label="Dosya ekle"
               title="Dosya ekle"
+              onClick={onUploadClick}
             >
               <Paperclip size={18} />
             </button>
 
             <span className="composer-hint">
-              {prompt.length > 0
-                ? `${prompt.length} karakter · Ctrl + Enter ile gönder`
-                : "Yanıtlar yalnızca seçili kaynaklara dayanır."}
+              {sending
+                ? "Yanıt hazırlanıyor..."
+                : prompt.length > 0
+? `${prompt.length} karakter · Enter gönderir · Shift + Enter yeni satır`
+: "Yanıtlar yalnızca seçili kaynaklara dayanır."}
             </span>
 
             <button
@@ -188,9 +263,18 @@ function ChatWorkspace() {
               aria-label="Soruyu gönder"
               title="Gönder"
               disabled={!canSubmit}
-              onClick={submitPrompt}
+              onClick={() => {
+                void submitPrompt();
+              }}
             >
-              <ArrowUp size={19} strokeWidth={2.4} />
+              {sending ? (
+                <LoaderCircle
+                  className="spinning-icon"
+                  size={19}
+                />
+              ) : (
+                <ArrowUp size={19} strokeWidth={2.4} />
+              )}
             </button>
           </div>
         </div>

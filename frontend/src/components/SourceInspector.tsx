@@ -1,31 +1,23 @@
 import {
   ChevronRight,
-  ExternalLink,
   FileText,
   Layers3,
   SearchCheck,
 } from "lucide-react";
 
-const sources = [
-  {
-    id: 1,
-    filename: "company.pdf",
-    similarity: 0.91,
-    chunk: 4,
-    content:
-      "Şirket, mobil iletişim çözümleri ve kurumsal yazılım hizmetleri alanında faaliyet göstermektedir. Proje süreçlerinde ölçeklenebilirlik, güvenilirlik ve kullanıcı deneyimi önceliklidir.",
-  },
-  {
-    id: 2,
-    filename: "rag-notes.docx",
-    similarity: 0.87,
-    chunk: 8,
-    content:
-      "Embedding vektörleri PostgreSQL üzerinde pgvector uzantısı kullanılarak document_chunks tablosunda saklanır ve benzerlik araması cosine distance üzerinden gerçekleştirilir.",
-  },
-];
+import type { ChatSourceRead } from "../types";
 
-function SourceInspector() {
+interface SourceInspectorProps {
+  sources: ChatSourceRead[];
+}
+
+function clampSimilarity(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function SourceInspector({
+  sources,
+}: SourceInspectorProps) {
   return (
     <div className="source-inspector-content">
       <div className="inspector-heading">
@@ -34,7 +26,9 @@ function SourceInspector() {
           <h2>Kaynaklar</h2>
         </div>
 
-        <span className="inspector-count">2</span>
+        <span className="inspector-count">
+          {sources.length}
+        </span>
       </div>
 
       <p className="inspector-description">
@@ -47,69 +41,94 @@ function SourceInspector() {
         </div>
 
         <div>
-          <strong>Kaynak doğrulaması hazır</strong>
-          <span>2 belge parçası eşleşti.</span>
+          <strong>
+            {sources.length > 0
+              ? "Kaynak doğrulaması hazır"
+              : "Henüz kaynak bulunmuyor"}
+          </strong>
+
+          <span>
+            {sources.length > 0
+              ? `${sources.length} belge parçası eşleşti.`
+              : "Bir soru gönderdiğinde eşleşen parçalar burada gösterilir."}
+          </span>
         </div>
       </div>
 
       <div className="source-result-list">
-        {sources.map((source, index) => (
-          <article className="source-result-card" key={source.id}>
-            <div className="source-result-topline">
-              <span className="source-rank">{index + 1}</span>
+        {sources.map((source, index) => {
+          const similarity = clampSimilarity(
+            source.similarity_score,
+          );
 
-              <div className="source-file-icon">
-                <FileText size={17} />
-              </div>
-
-              <div className="source-file-copy">
-                <strong>{source.filename}</strong>
-
-                <span>
-                  <Layers3 size={12} />
-                  Parça {source.chunk}
+          return (
+            <article
+              className="source-result-card"
+              key={`${source.chunk_id}-${index}`}
+            >
+              <div className="source-result-topline">
+                <span className="source-rank">
+                  {index + 1}
                 </span>
+
+                <div className="source-file-icon">
+                  <FileText size={17} />
+                </div>
+
+                <div className="source-file-copy">
+                  <strong>
+                    {source.original_filename}
+                  </strong>
+
+                  <span>
+                    <Layers3 size={12} />
+                    Parça {source.chunk_index}
+                  </span>
+                </div>
               </div>
+
+              <div className="similarity-row">
+                <div>
+                  <span>Benzerlik</span>
+                  <strong>
+                    {Math.round(similarity * 100)}%
+                  </strong>
+                </div>
+
+                <div
+                  className="similarity-track"
+                  aria-hidden="true"
+                >
+                  <span
+                    style={{
+                      width: `${similarity * 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <p className="source-preview">
+                {source.content}
+              </p>
 
               <button
-                className="source-open-button"
+                className="source-detail-button"
                 type="button"
-                aria-label={`${source.filename} kaynağını aç`}
-                title="Kaynağı aç"
               >
-                <ExternalLink size={15} />
+                Parçayı incele
+                <ChevronRight size={15} />
               </button>
-            </div>
-
-            <div className="similarity-row">
-              <div>
-                <span>Benzerlik</span>
-                <strong>{Math.round(source.similarity * 100)}%</strong>
-              </div>
-
-              <div className="similarity-track" aria-hidden="true">
-                <span
-                  style={{
-                    width: `${source.similarity * 100}%`,
-                  }}
-                />
-              </div>
-            </div>
-
-            <p className="source-preview">{source.content}</p>
-
-            <button className="source-detail-button" type="button">
-              Parçayı incele
-              <ChevronRight size={15} />
-            </button>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
 
-      <div className="inspector-footer-note">
-        <Layers3 size={15} />
-        Kaynak sıralaması semantik benzerlik skoruna göre yapılır.
-      </div>
+      {sources.length > 0 && (
+        <div className="inspector-footer-note">
+          <Layers3 size={15} />
+          Kaynak sıralaması semantik benzerlik skoruna göre yapılır.
+        </div>
+      )}
     </div>
   );
 }

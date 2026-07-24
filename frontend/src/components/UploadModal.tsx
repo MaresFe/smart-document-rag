@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   FileText,
+  LoaderCircle,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -9,22 +10,36 @@ import {
 interface UploadModalProps {
   open: boolean;
   onClose: () => void;
+  onUpload: (files: File[]) => Promise<void>;
 }
 
 function UploadModal({
   open,
   onClose,
+  onUpload,
 }: UploadModalProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+
   const [dragging, setDragging] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setDragging(false);
+      setSelectedFiles([]);
+      setUploading(false);
+      setUploadError(null);
+    }
+  }, [open]);
 
   if (!open) {
     return null;
   }
 
   function addFiles(files: FileList | null) {
-    if (!files) {
+    if (!files || uploading) {
       return;
     }
 
@@ -33,23 +48,58 @@ function UploadModal({
     setSelectedFiles((currentFiles) => {
       const knownFiles = new Set(
         currentFiles.map(
-          (file) => `${file.name}-${file.size}`,
+          (file) => `${file.name}-${file.size}-${file.lastModified}`,
         ),
       );
 
       const uniqueIncomingFiles = incomingFiles.filter(
         (file) =>
-          !knownFiles.has(`${file.name}-${file.size}`),
+          !knownFiles.has(
+            `${file.name}-${file.size}-${file.lastModified}`,
+          ),
       );
 
       return [...currentFiles, ...uniqueIncomingFiles];
     });
+
+    setUploadError(null);
+
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
   }
 
   function closeModal() {
+    if (uploading) {
+      return;
+    }
+
     setDragging(false);
     setSelectedFiles([]);
+    setUploadError(null);
     onClose();
+  }
+
+  async function submitUpload() {
+    if (selectedFiles.length === 0 || uploading) {
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+
+    try {
+      await onUpload(selectedFiles);
+      closeModal();
+    } catch (error) {
+      setUploadError(
+        error instanceof Error
+          ? error.message
+          : "Dosyalar yüklenemedi.",
+      );
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -77,6 +127,7 @@ function UploadModal({
           <button
             type="button"
             aria-label="Pencereyi kapat"
+            disabled={uploading}
             onClick={closeModal}
           >
             <X size={18} />
@@ -89,11 +140,17 @@ function UploadModal({
           }`}
           onDragEnter={(event) => {
             event.preventDefault();
-            setDragging(true);
+
+            if (!uploading) {
+              setDragging(true);
+            }
           }}
           onDragOver={(event) => {
             event.preventDefault();
-            setDragging(true);
+
+            if (!uploading) {
+              setDragging(true);
+            }
           }}
           onDragLeave={(event) => {
             event.preventDefault();
@@ -106,14 +163,23 @@ function UploadModal({
           }}
         >
           <div className="dropzone-icon">
-            <UploadCloud size={34} />
+            {uploading ? (
+              <LoaderCircle className="spinning-icon" size={34} />
+            ) : (
+              <UploadCloud size={34} />
+            )}
           </div>
 
-          <h3>Dosyaları buraya bırak</h3>
+          <h3>
+            {uploading
+              ? "Dokümanlar işleniyor"
+              : "Dosyaları buraya bırak"}
+          </h3>
 
           <p>
-            PDF, DOCX, TXT, CSV ve XLSX dosyaları
-            desteklenir.
+            PDF, DOCX ve TXT dosyaları yükleyebilirsin. Yükleme
+            sırasında metin çıkarma, chunking ve embedding işlemleri
+            uygulanır.
           </p>
 
           <input
@@ -121,15 +187,15 @@ function UploadModal({
             type="file"
             multiple
             hidden
-            accept=".pdf,.docx,.txt,.csv,.xlsx"
-            onChange={(event) =>
-              addFiles(event.target.files)
-            }
+            disabled={uploading}
+            accept=".pdf,.docx,.txt"
+            onChange={(event) => addFiles(event.target.files)}
           />
 
           <button
             className="secondary-btn upload-select-button"
             type="button"
+            disabled={uploading}
             onClick={() => inputRef.current?.click()}
           >
             Dosya seç
@@ -146,7 +212,7 @@ function UploadModal({
             {selectedFiles.map((file) => (
               <div
                 className="selected-file-item"
-                key={`${file.name}-${file.size}`}
+                key={`${file.name}-${file.size}-${file.lastModified}`}
               >
                 <span className="selected-file-icon">
                   <FileText size={17} />
@@ -154,6 +220,7 @@ function UploadModal({
 
                 <span className="selected-file-copy">
                   <strong>{file.name}</strong>
+
                   <span>
                     {(file.size / 1024 / 1024).toFixed(2)} MB
                   </span>
@@ -161,12 +228,12 @@ function UploadModal({
 
                 <button
                   type="button"
+                  disabled={uploading}
                   aria-label={`${file.name} dosyasını kaldır`}
                   onClick={() =>
                     setSelectedFiles((currentFiles) =>
                       currentFiles.filter(
-                        (currentFile) =>
-                          currentFile !== file,
+                        (currentFile) => currentFile !== file,
                       ),
                     )
                   }
@@ -178,10 +245,17 @@ function UploadModal({
           </div>
         )}
 
+        {uploadError && (
+          <div className="modal-api-error" role="alert">
+            {uploadError}
+          </div>
+        )}
+
         <div className="modal-actions">
           <button
             className="secondary-btn"
             type="button"
+            disabled={uploading}
             onClick={closeModal}
           >
             İptal
@@ -190,11 +264,21 @@ function UploadModal({
           <button
             className="primary-btn"
             type="button"
-            disabled={selectedFiles.length === 0}
+            disabled={selectedFiles.length === 0 || uploading}
+            onClick={() => {
+              void submitUpload();
+            }}
           >
-            {selectedFiles.length > 0
-              ? `${selectedFiles.length} dosyayı yükle`
-              : "Dosya seçin"}
+            {uploading ? (
+              <>
+                <LoaderCircle className="spinning-icon" size={17} />
+                İşleniyor
+              </>
+            ) : selectedFiles.length > 0 ? (
+              `${selectedFiles.length} dosyayı yükle`
+            ) : (
+              "Dosya seçin"
+            )}
           </button>
         </div>
       </section>

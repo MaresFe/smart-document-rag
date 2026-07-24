@@ -1,155 +1,216 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Check,
   Clock3,
   FileText,
+  LoaderCircle,
   MessageSquare,
   MessageSquarePlus,
   MoreHorizontal,
-  Plus,
   Search,
+  Trash2,
   Upload,
 } from "lucide-react";
 
-interface DocumentItem {
-  id: string;
-  name: string;
-  type: string;
-  size: string;
-}
-
-interface ConversationItem {
-  id: string;
-  title: string;
-  updatedAt: string;
-}
-
-const initialDocuments: DocumentItem[] = [
-  {
-    id: "document-1",
-    name: "company.pdf",
-    type: "PDF",
-    size: "2.4 MB",
-  },
-  {
-    id: "document-2",
-    name: "rag-notes.docx",
-    type: "DOCX",
-    size: "860 KB",
-  },
-  {
-    id: "document-3",
-    name: "architecture.pdf",
-    type: "PDF",
-    size: "1.2 MB",
-  },
-];
-
-const initialConversations: ConversationItem[] = [
-  {
-    id: "conversation-1",
-    title: "Embedding yapısı",
-    updatedAt: "Az önce",
-  },
-  {
-    id: "conversation-2",
-    title: "Şirket hizmetleri özeti",
-    updatedAt: "18 dk önce",
-  },
-  {
-    id: "conversation-3",
-    title: "Backend mimarisi",
-    updatedAt: "Dün",
-  },
-];
+import type {
+  ChatSessionRead,
+  DocumentRead,
+} from "../types";
 
 interface SourceSidebarProps {
+  documents: DocumentRead[];
+  sessions: ChatSessionRead[];
+  selectedDocumentIds: string[];
+  activeSessionId: string | null;
+  loading: boolean;
+  creatingSession: boolean;
+  deletingDocumentId: string | null;
+  deletingSessionId: string | null;
+  renamingSessionId: string | null;
+  error: string | null;
   onUploadClick: () => void;
+  onDocumentToggle: (documentId: string) => void;
+  onDeleteDocument: (documentId: string) => Promise<void>;
+  onSessionSelect: (sessionId: string) => void;
+  onRenameSession: (sessionId: string) => Promise<void>;
+  onDeleteSession: (sessionId: string) => Promise<void>;
+  onCreateSession: () => Promise<ChatSessionRead | null>;
+}
+
+function formatFileSize(size: number | null): string {
+  if (size === null) {
+    return "Boyut bilinmiyor";
+  }
+
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(0)} KB`;
+  }
+
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatRelativeDate(dateValue: string): string {
+  const date = new Date(dateValue);
+  const difference = Date.now() - date.getTime();
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (difference < minute) {
+    return "Şimdi";
+  }
+
+  if (difference < hour) {
+    return `${Math.floor(difference / minute)} dk önce`;
+  }
+
+  if (difference < day) {
+    return `${Math.floor(difference / hour)} sa önce`;
+  }
+
+  if (difference < day * 2) {
+    return "Dün";
+  }
+
+  return date.toLocaleDateString("tr-TR", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function getDocumentStatusLabel(
+  document: DocumentRead,
+): string {
+  if (document.status === "ready") {
+    return `${document.file_type.toUpperCase()} · ${formatFileSize(
+      document.file_size,
+    )}`;
+  }
+
+  if (document.status === "processing") {
+    return "İşleniyor";
+  }
+
+  if (document.status === "failed") {
+    return "İşlenemedi";
+  }
+
+  return document.status;
 }
 
 function SourceSidebar({
+  documents,
+  sessions,
+  selectedDocumentIds,
+  activeSessionId,
+  loading,
+  creatingSession,
+  deletingDocumentId,
+  deletingSessionId,
+  renamingSessionId,
+  error,
   onUploadClick,
-}: SourceSidebarProps) {  
-    const [searchValue, setSearchValue] = useState("");
-  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([
-    "document-1",
-    "document-2",
-  ]);
+  onDocumentToggle,
+  onDeleteDocument,
+  onSessionSelect,
+  onRenameSession,
+  onDeleteSession,
+  onCreateSession,
+}: SourceSidebarProps) {
+  const [searchValue, setSearchValue] = useState("");
 
-  const [conversations, setConversations] =
-    useState<ConversationItem[]>(initialConversations);
+  const [
+    openDocumentMenuId,
+    setOpenDocumentMenuId,
+  ] = useState<string | null>(null);
 
-  const [activeConversationId, setActiveConversationId] = useState(
-    "conversation-1",
-  );
+  const [
+    openSessionMenuId,
+    setOpenSessionMenuId,
+  ] = useState<string | null>(null);
 
-  const filteredDocuments = useMemo(() => {
-    const normalizedSearch = searchValue.trim().toLocaleLowerCase("tr");
-
-    if (!normalizedSearch) {
-      return initialDocuments;
+  useEffect(() => {
+    if (
+      !openDocumentMenuId &&
+      !openSessionMenuId
+    ) {
+      return;
     }
 
-    return initialDocuments.filter((document) =>
-      document.name.toLocaleLowerCase("tr").includes(normalizedSearch),
+    function closeOpenMenus() {
+      setOpenDocumentMenuId(null);
+      setOpenSessionMenuId(null);
+    }
+
+    window.addEventListener(
+      "click",
+      closeOpenMenus,
     );
-  }, [searchValue]);
 
-  function toggleDocument(documentId: string) {
-    setSelectedDocumentIds((currentIds) => {
-      if (currentIds.includes(documentId)) {
-        return currentIds.filter((id) => id !== documentId);
-      }
-
-      return [...currentIds, documentId];
-    });
-  }
-
-  function createConversation() {
-    const conversationId = crypto.randomUUID();
-
-    const newConversation: ConversationItem = {
-      id: conversationId,
-      title: "Yeni sohbet",
-      updatedAt: "Şimdi",
+    return () => {
+      window.removeEventListener(
+        "click",
+        closeOpenMenus,
+      );
     };
+  }, [
+    openDocumentMenuId,
+    openSessionMenuId,
+  ]);
 
-    setConversations((currentConversations) => [
-      newConversation,
-      ...currentConversations,
-    ]);
+  const filteredDocuments = useMemo(() => {
+    const normalizedSearch = searchValue
+      .trim()
+      .toLocaleLowerCase("tr");
 
-    setActiveConversationId(conversationId);
-  }
+    if (!normalizedSearch) {
+      return documents;
+    }
+
+    return documents.filter((document) =>
+      document.original_filename
+        .toLocaleLowerCase("tr")
+        .includes(normalizedSearch),
+    );
+  }, [documents, searchValue]);
+
+  const readyDocumentCount = documents.filter(
+    (document) =>
+      document.status === "ready",
+  ).length;
 
   return (
     <div className="source-sidebar-content">
       <div className="sidebar-heading">
         <div>
-          <p className="eyebrow">Çalışma Alanı</p>
+          <p className="eyebrow">
+            Çalışma Alanı
+          </p>
+
           <h2>Kaynaklar</h2>
         </div>
-
-        <button
-          className="small-icon-button"
-          type="button"
-          aria-label="Yeni kaynak ekle"
-          title="Yeni kaynak ekle"
-        >
-          <Plus size={17} />
-        </button>
       </div>
 
       <p className="sidebar-description">
-        Sorularınız yalnızca seçili belgeler üzerinden yanıtlanır.
+        Sorularınız yalnızca seçili belgeler
+        üzerinden yanıtlanır.
       </p>
 
-     <button
-  className="primary-btn"
-  type="button"
-  onClick={onUploadClick}
->
+      <button
+        className="primary-btn"
+        type="button"
+        onClick={onUploadClick}
+      >
         <Upload size={17} />
         Doküman yükle
       </button>
@@ -162,7 +223,11 @@ function SourceSidebar({
           value={searchValue}
           placeholder="Kaynaklarda ara"
           aria-label="Kaynaklarda ara"
-          onChange={(event) => setSearchValue(event.target.value)}
+          onChange={(event) =>
+            setSearchValue(
+              event.target.value,
+            )
+          }
         />
       </label>
 
@@ -170,61 +235,204 @@ function SourceSidebar({
         <span>Belgeler</span>
 
         <span>
-          {selectedDocumentIds.length} / {initialDocuments.length} seçili
+          {selectedDocumentIds.length} /{" "}
+          {documents.length} seçili
         </span>
       </div>
 
       <div className="document-list">
-        {filteredDocuments.length > 0 ? (
-          filteredDocuments.map((document) => {
-            const selected = selectedDocumentIds.includes(document.id);
+        {loading ? (
+          <div className="sidebar-empty-state">
+            <LoaderCircle
+              className="spinning-icon"
+              size={18}
+            />
 
-            return (
-              <button
-                key={document.id}
-                className={`document-item ${
-                  selected ? "document-item-selected" : ""
-                }`}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => toggleDocument(document.id)}
-              >
-                <span className="document-check">
-                  {selected && <Check size={13} strokeWidth={3} />}
-                </span>
+            <span>
+              Belgeler yükleniyor...
+            </span>
+          </div>
+        ) : filteredDocuments.length > 0 ? (
+          filteredDocuments.map(
+            (document) => {
+              const selected =
+                selectedDocumentIds.includes(
+                  document.id,
+                );
 
-                <span className="document-icon">
-                  <FileText size={18} />
-                </span>
+              const selectable =
+                document.status === "ready";
 
-                <span className="document-copy">
-                  <span className="document-name">{document.name}</span>
+              const deleting =
+                deletingDocumentId ===
+                document.id;
 
-                  <span className="document-meta">
-                    {document.type} · {document.size}
-                  </span>
-                </span>
+              const menuOpen =
+                openDocumentMenuId ===
+                document.id;
 
-                <span className="document-menu" aria-hidden="true">
-                  <MoreHorizontal size={17} />
-                </span>
-              </button>
-            );
-          })
+              return (
+                <div
+                  key={document.id}
+                  className={`document-item ${
+                    selected
+                      ? "document-item-selected"
+                      : ""
+                  }`}
+                >
+                  <button
+                    className="document-main-button"
+                    type="button"
+                    aria-pressed={selected}
+                    disabled={
+                      !selectable ||
+                      deleting
+                    }
+                    title={
+                      document.status ===
+                      "failed"
+                        ? document.error_message ??
+                          "Belge işlenemedi."
+                        : undefined
+                    }
+                    onClick={() =>
+                      onDocumentToggle(
+                        document.id,
+                      )
+                    }
+                  >
+                    <span className="document-check">
+                      {selected && (
+                        <Check
+                          size={13}
+                          strokeWidth={3}
+                        />
+                      )}
+                    </span>
+
+                    <span className="document-icon">
+                      <FileText size={18} />
+                    </span>
+
+                    <span className="document-copy">
+                      <span className="document-name">
+                        {
+                          document.original_filename
+                        }
+                      </span>
+
+                      <span className="document-meta">
+                        {deleting
+                          ? "Siliniyor..."
+                          : getDocumentStatusLabel(
+                              document,
+                            )}
+                      </span>
+                    </span>
+                  </button>
+
+                  <div className="document-menu-wrapper">
+                    <button
+                      className="document-menu-button"
+                      type="button"
+                      aria-label={`${document.original_filename} seçenekleri`}
+                      aria-haspopup="menu"
+                      aria-expanded={
+                        menuOpen
+                      }
+                      disabled={deleting}
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        setOpenSessionMenuId(
+                          null,
+                        );
+
+                        setOpenDocumentMenuId(
+                          menuOpen
+                            ? null
+                            : document.id,
+                        );
+                      }}
+                    >
+                      {deleting ? (
+                        <LoaderCircle
+                          className="spinning-icon"
+                          size={16}
+                        />
+                      ) : (
+                        <MoreHorizontal
+                          size={17}
+                        />
+                      )}
+                    </button>
+
+                    {menuOpen && (
+                      <div
+                        className="document-menu-popover"
+                        role="menu"
+                        onClick={(event) =>
+                          event.stopPropagation()
+                        }
+                      >
+                        <button
+                          className="document-delete-action"
+                          type="button"
+                          role="menuitem"
+                          disabled={deleting}
+                          onClick={(event) => {
+                            event.stopPropagation();
+
+                            setOpenDocumentMenuId(
+                              null,
+                            );
+
+                            void onDeleteDocument(
+                              document.id,
+                            );
+                          }}
+                        >
+                          <Trash2 size={15} />
+                          Belgeyi sil
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            },
+          )
         ) : (
           <div className="sidebar-empty-state">
             <Search size={18} />
-            <span>Eşleşen kaynak bulunamadı.</span>
+
+            <span>
+              {documents.length === 0
+                ? "Henüz doküman yüklenmedi."
+                : "Eşleşen kaynak bulunamadı."}
+            </span>
           </div>
         )}
       </div>
+
+      {error && (
+        <div
+          className="sidebar-api-error"
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
 
       <div className="sidebar-divider" />
 
       <section className="conversation-section">
         <div className="conversation-heading">
           <div>
-            <p className="eyebrow">Geçmiş</p>
+            <p className="eyebrow">
+              Geçmiş
+            </p>
+
             <h3>Sohbetler</h3>
           </div>
 
@@ -233,45 +441,198 @@ function SourceSidebar({
             type="button"
             aria-label="Yeni sohbet oluştur"
             title="Yeni sohbet"
-            onClick={createConversation}
+            disabled={creatingSession}
+            onClick={() => {
+              void onCreateSession();
+            }}
           >
-            <MessageSquarePlus size={17} />
+            {creatingSession ? (
+              <LoaderCircle
+                className="spinning-icon"
+                size={17}
+              />
+            ) : (
+              <MessageSquarePlus
+                size={17}
+              />
+            )}
           </button>
         </div>
 
         <div className="conversation-list">
-          {conversations.map((conversation) => {
-            const active = conversation.id === activeConversationId;
+          {sessions.length > 0 ? (
+            sessions.map((session) => {
+              const active =
+                session.id ===
+                activeSessionId;
 
-            return (
-              <button
-                key={conversation.id}
-                className={`conversation-item ${
-                  active ? "conversation-item-active" : ""
-                }`}
-                type="button"
-                aria-current={active ? "true" : undefined}
-                onClick={() => setActiveConversationId(conversation.id)}
-              >
-                <span className="conversation-icon">
-                  <MessageSquare size={16} />
-                </span>
+              const deleting =
+                session.id ===
+                deletingSessionId;
 
-                <span className="conversation-copy">
-                  <strong>{conversation.title}</strong>
+              const renaming =
+                session.id ===
+                renamingSessionId;
 
-                  <span>
-                    <Clock3 size={11} />
-                    {conversation.updatedAt}
-                  </span>
-                </span>
+              const busy =
+                deleting || renaming;
 
-                <span className="conversation-menu" aria-hidden="true">
-                  <MoreHorizontal size={16} />
-                </span>
-              </button>
-            );
-          })}
+              const menuOpen =
+                session.id ===
+                openSessionMenuId;
+
+              return (
+                <div
+                  key={session.id}
+                  className={`conversation-item ${
+                    active
+                      ? "conversation-item-active"
+                      : ""
+                  }`}
+                >
+                  <button
+                    className="conversation-main-button"
+                    type="button"
+                    aria-current={
+                      active
+                        ? "true"
+                        : undefined
+                    }
+                    disabled={busy}
+                    onClick={() =>
+                      onSessionSelect(
+                        session.id,
+                      )
+                    }
+                  >
+                    <span className="conversation-icon">
+                      <MessageSquare
+                        size={16}
+                      />
+                    </span>
+
+                    <span className="conversation-copy">
+                      <strong>
+                        {session.title ||
+                          "Başlıksız sohbet"}
+                      </strong>
+
+                      <span>
+                        <Clock3 size={11} />
+
+                        {deleting
+                          ? "Siliniyor..."
+                          : renaming
+                            ? "Yeniden adlandırılıyor..."
+                            : formatRelativeDate(
+                                session.created_at,
+                              )}
+                      </span>
+                    </span>
+                  </button>
+
+                  <div className="conversation-menu-wrapper">
+                    <button
+                      className="conversation-menu-button"
+                      type="button"
+                      aria-label={`${
+                        session.title ||
+                        "Başlıksız sohbet"
+                      } seçenekleri`}
+                      aria-haspopup="menu"
+                      aria-expanded={
+                        menuOpen
+                      }
+                      disabled={busy}
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        setOpenDocumentMenuId(
+                          null,
+                        );
+
+                        setOpenSessionMenuId(
+                          menuOpen
+                            ? null
+                            : session.id,
+                        );
+                      }}
+                    >
+                      {busy ? (
+                        <LoaderCircle
+                          className="spinning-icon"
+                          size={16}
+                        />
+                      ) : (
+                        <MoreHorizontal
+                          size={16}
+                        />
+                      )}
+                    </button>
+
+                    {menuOpen && (
+                      <div
+                        className="conversation-menu-popover"
+                        role="menu"
+                        onClick={(event) =>
+                          event.stopPropagation()
+                        }
+                      >
+                        <button
+                          className="conversation-rename-action"
+                          type="button"
+                          role="menuitem"
+                          disabled={busy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+
+                            setOpenSessionMenuId(
+                              null,
+                            );
+
+                            void onRenameSession(
+                              session.id,
+                            );
+                          }}
+                        >
+                          Yeniden adlandır
+                        </button>
+
+                        <button
+                          className="conversation-delete-action"
+                          type="button"
+                          role="menuitem"
+                          disabled={busy}
+                          onClick={(event) => {
+                            event.stopPropagation();
+
+                            setOpenSessionMenuId(
+                              null,
+                            );
+
+                            void onDeleteSession(
+                              session.id,
+                            );
+                          }}
+                        >
+                          <Trash2 size={15} />
+                          Sohbeti sil
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="sidebar-empty-state">
+              <MessageSquare size={18} />
+
+              <span>
+                Henüz sohbet oluşturulmadı.
+              </span>
+            </div>
+          )}
         </div>
       </section>
 
@@ -281,10 +642,13 @@ function SourceSidebar({
         </div>
 
         <div>
-          <strong>{initialDocuments.length} kaynak hazır</strong>
+          <strong>
+            {readyDocumentCount} kaynak hazır
+          </strong>
 
           <span>
-            {selectedDocumentIds.length} kaynak aktif olarak kullanılıyor.
+            {selectedDocumentIds.length} kaynak
+            aktif olarak kullanılıyor.
           </span>
         </div>
       </div>
