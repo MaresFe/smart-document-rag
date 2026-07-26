@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 
 import "./App.css";
 
 import AppHeader from "./components/AppHeader";
+import AuthScreen from "./components/AuthScreen";
 import ChatWorkspace from "./components/ChatWorkspace";
 import SourceInspector from "./components/SourceInspector";
 import SourceSidebar from "./components/SourceSidebar";
@@ -14,8 +19,15 @@ import {
   deleteChatSession,
   deleteDocument,
   getChatMessages,
+  getChatMessageSources,
+  getChatSessionDocuments,
   getChatSessions,
+  getCurrentUser,
   getDocuments,
+  isAuthenticationError,
+  loginUser,
+  logoutUser,
+  registerUser,
   sendChatMessage,
   updateChatSession,
   uploadDocument,
@@ -26,6 +38,9 @@ import type {
   ChatSessionRead,
   ChatSourceRead,
   DocumentRead,
+  UserLoginCreate,
+  UserRead,
+  UserRegisterCreate,
 } from "./types";
 
 type Theme = "light" | "dark";
@@ -60,6 +75,21 @@ function getErrorMessage(error: unknown): string {
 function App() {
   const [theme, setTheme] =
     useState<Theme>(getInitialTheme);
+
+  const [currentUser, setCurrentUser] =
+    useState<UserRead | null>(null);
+
+  const [authChecking, setAuthChecking] =
+    useState(true);
+
+  const [authSubmitting, setAuthSubmitting] =
+    useState(false);
+
+  const [loggingOut, setLoggingOut] =
+    useState(false);
+
+  const [authError, setAuthError] =
+    useState<string | null>(null);
 
   const [sourcePanelOpen, setSourcePanelOpen] =
     useState(true);
@@ -122,8 +152,48 @@ function App() {
 
   const dark = theme === "dark";
 
+  const resetWorkspace = useCallback(() => {
+    setDocuments([]);
+    setSessions([]);
+    setMessages([]);
+    setSources([]);
+    setSelectedDocumentIds([]);
+    setActiveSessionId(null);
+
+    setUploadModalOpen(false);
+    setInitialLoading(true);
+    setMessagesLoading(false);
+    setCreatingSession(false);
+    setSendingMessage(false);
+    setDeletingDocumentId(null);
+    setDeletingSessionId(null);
+    setRenamingSessionId(null);
+
+    setSidebarError(null);
+    setChatError(null);
+  }, []);
+
+  const handleAuthenticationFailure =
+    useCallback(
+      (error: unknown): boolean => {
+        if (!isAuthenticationError(error)) {
+          return false;
+        }
+
+        resetWorkspace();
+        setCurrentUser(null);
+        setAuthError(
+          "Oturumunuz sona erdi. Lütfen tekrar giriş yapın.",
+        );
+
+        return true;
+      },
+      [resetWorkspace],
+    );
+
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.theme =
+      theme;
 
     localStorage.setItem(
       "smart-rag-theme",
@@ -131,25 +201,70 @@ function App() {
     );
   }, [theme]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function checkAuthentication() {
+      setAuthChecking(true);
+      setAuthError(null);
+
+      try {
+        const user = await getCurrentUser();
+
+        if (active) {
+          setCurrentUser(user);
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setCurrentUser(null);
+
+        if (!isAuthenticationError(error)) {
+          setAuthError(
+            getErrorMessage(error),
+          );
+        }
+      } finally {
+        if (active) {
+          setAuthChecking(false);
+        }
+      }
+    }
+
+    void checkAuthentication();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const loadDocuments = useCallback(async () => {
-    const loadedDocuments = await getDocuments();
+    const loadedDocuments =
+      await getDocuments();
 
     setDocuments(loadedDocuments);
 
-    setSelectedDocumentIds((currentIds) => {
-      const availableIds = new Set(
-        loadedDocuments
-          .filter(
-            (document) =>
-              document.status === "ready",
-          )
-          .map((document) => document.id),
-      );
+    setSelectedDocumentIds(
+      (currentIds) => {
+        const availableIds = new Set(
+          loadedDocuments
+            .filter(
+              (document) =>
+                document.status === "ready",
+            )
+            .map(
+              (document) =>
+                document.id,
+            ),
+        );
 
-      return currentIds.filter((id) =>
-        availableIds.has(id),
-      );
-    });
+        return currentIds.filter((id) =>
+          availableIds.has(id),
+        );
+      },
+    );
 
     return loadedDocuments;
   }, []);
@@ -164,6 +279,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    let active = true;
+
     async function initializeApplication() {
       setInitialLoading(true);
       setSidebarError(null);
@@ -177,10 +298,16 @@ function App() {
           loadSessions(),
         ]);
 
+        if (!active) {
+          return;
+        }
+
         if (loadedSessions.length > 0) {
           setActiveSessionId(
             loadedSessions[0].id,
           );
+
+          return;
         }
 
         const firstReadyDocument =
@@ -195,19 +322,42 @@ function App() {
           ]);
         }
       } catch (error) {
-        setSidebarError(
-          getErrorMessage(error),
-        );
+        if (!active) {
+          return;
+        }
+
+        if (
+          !handleAuthenticationFailure(error)
+        ) {
+          setSidebarError(
+            getErrorMessage(error),
+          );
+        }
       } finally {
-        setInitialLoading(false);
+        if (active) {
+          setInitialLoading(false);
+        }
       }
     }
 
     void initializeApplication();
-  }, [loadDocuments, loadSessions]);
+
+    return () => {
+      active = false;
+    };
+  }, [
+    currentUser,
+    handleAuthenticationFailure,
+    loadDocuments,
+    loadSessions,
+  ]);
 
   useEffect(() => {
     setSources([]);
+
+    if (!currentUser) {
+      return;
+    }
 
     if (!activeSessionId) {
       setMessages([]);
@@ -215,27 +365,175 @@ function App() {
     }
 
     const sessionId = activeSessionId;
+    let active = true;
 
-    async function loadMessages() {
+    async function loadSessionWorkspace() {
       setMessagesLoading(true);
       setChatError(null);
 
       try {
-        const loadedMessages =
-          await getChatMessages(sessionId);
+        const [
+          loadedMessages,
+          linkedDocuments,
+        ] = await Promise.all([
+          getChatMessages(sessionId),
+          getChatSessionDocuments(
+            sessionId,
+          ),
+        ]);
+
+        if (!active) {
+          return;
+        }
 
         setMessages(loadedMessages);
-      } catch (error) {
-        setChatError(
-          getErrorMessage(error),
+
+        setSelectedDocumentIds(
+          linkedDocuments.map(
+            (link) => link.document_id,
+          ),
         );
+
+        const lastAssistantMessage =
+          [...loadedMessages]
+            .reverse()
+            .find(
+              (message) =>
+                message.role ===
+                "assistant",
+            );
+
+        if (!lastAssistantMessage) {
+          setSources([]);
+          return;
+        }
+
+        try {
+          const loadedSources =
+            await getChatMessageSources(
+              sessionId,
+              lastAssistantMessage.id,
+            );
+
+          if (active) {
+            setSources(loadedSources);
+          }
+        } catch (error) {
+          if (!active) {
+            return;
+          }
+
+          if (
+            !handleAuthenticationFailure(
+              error,
+            )
+          ) {
+            setSources([]);
+            setChatError(
+              "Sohbet yüklendi ancak eski kaynaklar alınamadı.",
+            );
+          }
+        }
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        if (
+          !handleAuthenticationFailure(error)
+        ) {
+          setChatError(
+            getErrorMessage(error),
+          );
+        }
       } finally {
-        setMessagesLoading(false);
+        if (active) {
+          setMessagesLoading(false);
+        }
       }
     }
 
-    void loadMessages();
-  }, [activeSessionId]);
+    void loadSessionWorkspace();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeSessionId,
+    currentUser,
+    handleAuthenticationFailure,
+  ]);
+
+  async function handleLogin(
+    credentials: UserLoginCreate,
+  ): Promise<void> {
+    if (authSubmitting) {
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthError(null);
+
+    try {
+      const user =
+        await loginUser(credentials);
+
+      resetWorkspace();
+      setCurrentUser(user);
+    } catch (error) {
+      setAuthError(
+        getErrorMessage(error),
+      );
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function handleRegister(
+    registration: UserRegisterCreate,
+  ): Promise<void> {
+    if (authSubmitting) {
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthError(null);
+
+    try {
+      const user =
+        await registerUser(registration);
+
+      resetWorkspace();
+      setCurrentUser(user);
+    } catch (error) {
+      setAuthError(
+        getErrorMessage(error),
+      );
+    } finally {
+      setAuthSubmitting(false);
+    }
+  }
+
+  async function handleLogout():
+    Promise<void> {
+    if (loggingOut) {
+      return;
+    }
+
+    setLoggingOut(true);
+
+    try {
+      await logoutUser();
+    } catch {
+      // Sunucuya ulaşılamasa bile yerel
+      // kullanıcı oturumu kapatılır.
+    } finally {
+      resetWorkspace();
+      setCurrentUser(null);
+      setAuthError(null);
+      setLoggingOut(false);
+    }
+  }
 
   function toggleTheme() {
     setTheme((currentTheme) =>
@@ -269,10 +567,11 @@ function App() {
       return;
     }
 
-    const documentToDelete = documents.find(
-      (document) =>
-        document.id === documentId,
-    );
+    const documentToDelete =
+      documents.find(
+        (document) =>
+          document.id === documentId,
+      );
 
     if (!documentToDelete) {
       return;
@@ -292,11 +591,13 @@ function App() {
     try {
       await deleteDocument(documentId);
 
-      setDocuments((currentDocuments) =>
-        currentDocuments.filter(
-          (document) =>
-            document.id !== documentId,
-        ),
+      setDocuments(
+        (currentDocuments) =>
+          currentDocuments.filter(
+            (document) =>
+              document.id !==
+              documentId,
+          ),
       );
 
       setSelectedDocumentIds(
@@ -314,9 +615,13 @@ function App() {
         ),
       );
     } catch (error) {
-      setSidebarError(
-        getErrorMessage(error),
-      );
+      if (
+        !handleAuthenticationFailure(error)
+      ) {
+        setSidebarError(
+          getErrorMessage(error),
+        );
+      }
     } finally {
       setDeletingDocumentId(null);
     }
@@ -329,10 +634,11 @@ function App() {
       return;
     }
 
-    const sessionToDelete = sessions.find(
-      (session) =>
-        session.id === sessionId,
-    );
+    const sessionToDelete =
+      sessions.find(
+        (session) =>
+          session.id === sessionId,
+      );
 
     if (!sessionToDelete) {
       return;
@@ -378,9 +684,13 @@ function App() {
         setSources([]);
       }
     } catch (error) {
-      setSidebarError(
-        getErrorMessage(error),
-      );
+      if (
+        !handleAuthenticationFailure(error)
+      ) {
+        setSidebarError(
+          getErrorMessage(error),
+        );
+      }
     } finally {
       setDeletingSessionId(null);
     }
@@ -393,10 +703,11 @@ function App() {
       return;
     }
 
-    const sessionToRename = sessions.find(
-      (session) =>
-        session.id === sessionId,
-    );
+    const sessionToRename =
+      sessions.find(
+        (session) =>
+          session.id === sessionId,
+      );
 
     if (!sessionToRename) {
       return;
@@ -406,10 +717,11 @@ function App() {
       sessionToRename.title ||
       "Başlıksız sohbet";
 
-    const requestedTitle = window.prompt(
-      "Sohbet için yeni bir ad gir:",
-      currentTitle,
-    );
+    const requestedTitle =
+      window.prompt(
+        "Sohbet için yeni bir ad gir:",
+        currentTitle,
+      );
 
     if (requestedTitle === null) {
       return;
@@ -443,17 +755,23 @@ function App() {
           },
         );
 
-      setSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id === sessionId
-            ? updatedSession
-            : session,
-        ),
+      setSessions(
+        (currentSessions) =>
+          currentSessions.map(
+            (session) =>
+              session.id === sessionId
+                ? updatedSession
+                : session,
+          ),
       );
     } catch (error) {
-      setSidebarError(
-        getErrorMessage(error),
-      );
+      if (
+        !handleAuthenticationFailure(error)
+      ) {
+        setSidebarError(
+          getErrorMessage(error),
+        );
+      }
     } finally {
       setRenamingSessionId(null);
     }
@@ -475,14 +793,16 @@ function App() {
           title: "Yeni sohbet",
         });
 
-      setSessions((currentSessions) => [
-        session,
-        ...currentSessions.filter(
-          (currentSession) =>
-            currentSession.id !==
-            session.id,
-        ),
-      ]);
+      setSessions(
+        (currentSessions) => [
+          session,
+          ...currentSessions.filter(
+            (currentSession) =>
+              currentSession.id !==
+              session.id,
+          ),
+        ],
+      );
 
       setActiveSessionId(session.id);
       setMessages([]);
@@ -490,9 +810,13 @@ function App() {
 
       return session;
     } catch (error) {
-      setSidebarError(
-        getErrorMessage(error),
-      );
+      if (
+        !handleAuthenticationFailure(error)
+      ) {
+        setSidebarError(
+          getErrorMessage(error),
+        );
+      }
 
       return null;
     } finally {
@@ -566,9 +890,13 @@ function App() {
         );
       }
     } catch (error) {
-      setSidebarError(
-        getErrorMessage(error),
-      );
+      if (
+        !handleAuthenticationFailure(error)
+      ) {
+        setSidebarError(
+          getErrorMessage(error),
+        );
+      }
 
       throw error;
     }
@@ -591,6 +919,10 @@ function App() {
       return;
     }
 
+    const messageDocumentIds = [
+      ...selectedDocumentIds,
+    ];
+
     setSendingMessage(true);
     setChatError(null);
     setSources([]);
@@ -612,7 +944,7 @@ function App() {
 
       await attachDocumentsToChatSession(
         sessionId,
-        selectedDocumentIds,
+        messageDocumentIds,
       );
 
       const response =
@@ -621,11 +953,17 @@ function App() {
           content,
         );
 
-      setMessages((currentMessages) => [
-        ...currentMessages,
-        response.user_message,
-        response.assistant_message,
-      ]);
+      setMessages(
+        (currentMessages) => [
+          ...currentMessages,
+          response.user_message,
+          response.assistant_message,
+        ],
+      );
+
+      setSelectedDocumentIds(
+        messageDocumentIds,
+      );
 
       setSources(response.sources);
 
@@ -649,21 +987,55 @@ function App() {
         ];
       });
     } catch (error) {
-      setChatError(
-        getErrorMessage(error),
-      );
+      if (
+        !handleAuthenticationFailure(error)
+      ) {
+        setChatError(
+          getErrorMessage(error),
+        );
+      }
     } finally {
       setSendingMessage(false);
     }
   }
 
+  if (authChecking) {
+    return (
+      <main className="auth-loading-screen">
+        <img
+          src="/brand/mobilisim-logo.png"
+          alt="Mobilişim İletişim A.Ş."
+        />
+
+        <p>Oturum kontrol ediliyor...</p>
+      </main>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        submitting={authSubmitting}
+        error={authError}
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+        onClearError={() =>
+          setAuthError(null)
+        }
+      />
+    );
+  }
+
   return (
     <div className="application-shell">
       <AppHeader
+        user={currentUser}
         dark={dark}
         sourcePanelOpen={
           sourcePanelOpen
         }
+        loggingOut={loggingOut}
+        onLogout={handleLogout}
         onThemeToggle={toggleTheme}
         onSourcePanelToggle={() =>
           setSourcePanelOpen(

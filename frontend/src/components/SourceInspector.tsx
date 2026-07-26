@@ -11,8 +11,13 @@ interface SourceInspectorProps {
   sources: ChatSourceRead[];
 }
 
-function clampSimilarity(value: number): number {
-  return Math.max(0, Math.min(1, value));
+function clampSimilarity(
+  value: number | null,
+): number {
+  return Math.max(
+    0,
+    Math.min(1, value ?? 0),
+  );
 }
 
 function SourceInspector({

@@ -1,27 +1,38 @@
 import { PanelRight } from "lucide-react";
 
+import type { UserRead } from "../types";
+
 import ThemeToggle from "./ThemeToggle";
 
 interface AppHeaderProps {
+  user: UserRead;
   dark: boolean;
   sourcePanelOpen: boolean;
+  loggingOut: boolean;
+  onLogout: () => Promise<void>;
   onThemeToggle: () => void;
   onSourcePanelToggle: () => void;
 }
 
 function AppHeader({
+  user,
   dark,
   sourcePanelOpen,
+  loggingOut,
+  onLogout,
   onThemeToggle,
   onSourcePanelToggle,
 }: AppHeaderProps) {
+  const displayName =
+    user.full_name?.trim() || user.email;
+
   return (
     <header className="app-header">
       <div className="brand">
         <img
           className="brand-logo"
           src="/brand/mobilisim-logo.png"
-          alt="Mobilisim İletişim A.Ş."
+          alt="Mobilişim İletişim A.Ş."
         />
 
         <span
@@ -41,6 +52,26 @@ function AppHeader({
       </div>
 
       <div className="header-actions">
+        <div className="header-account">
+          <div className="header-account-copy">
+            <strong>{displayName}</strong>
+            <span>{user.email}</span>
+          </div>
+
+          <button
+            className="header-logout-button"
+            type="button"
+            disabled={loggingOut}
+            onClick={() => {
+              void onLogout();
+            }}
+          >
+            {loggingOut
+              ? "Çıkış yapılıyor..."
+              : "Çıkış"}
+          </button>
+        </div>
+
         <button
           className={`icon-button ${
             sourcePanelOpen

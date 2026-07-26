@@ -10,15 +10,31 @@ export type ChatRole =
   | "system"
   | string;
 
+export interface UserRead {
+  id: string;
+  email: string;
+  full_name: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface UserRegisterCreate {
+  email: string;
+  password: string;
+  full_name?: string | null;
+}
+
+export interface UserLoginCreate {
+  email: string;
+  password: string;
+}
+
 export interface DocumentRead {
   id: string;
-  user_id: string;
   original_filename: string;
-  stored_filename: string;
   file_type: string;
   mime_type: string | null;
   file_size: number | null;
-  storage_path: string;
   status: DocumentStatus;
   error_message: string | null;
   created_at: string;
@@ -44,7 +60,6 @@ export interface ChatSessionUpdate {
 
 export interface ChatSessionRead {
   id: string;
-  user_id: string;
   title: string | null;
   created_at: string;
 }
@@ -66,7 +81,7 @@ export interface ChatSourceRead {
   document_id: string;
   chunk_index: number;
   content: string;
-  similarity_score: number;
+  similarity_score: number | null;
   original_filename: string | null;
 }
 
@@ -96,12 +111,21 @@ export interface DatabaseHealthResponse {
   detail?: string;
 }
 
+export interface ApiValidationIssue {
+  loc?: Array<string | number>;
+  msg?: string;
+  type?: string;
+}
+
+export interface ApiErrorDetail {
+  message?: string;
+  document_ids?: string[];
+  [key: string]: unknown;
+}
+
 export interface ApiErrorPayload {
   detail?:
     | string
-    | {
-        message?: string;
-        document_ids?: string[];
-        [key: string]: unknown;
-      };
+    | ApiErrorDetail
+    | ApiValidationIssue[];
 }

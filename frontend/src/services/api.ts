@@ -12,30 +12,39 @@ import type {
   ChatSessionDocumentCreate,
   ChatSessionDocumentRead,
   ChatSessionRead,
+  ChatSessionUpdate,
+  ChatSourceRead,
   DatabaseHealthResponse,
   DocumentChunkRead,
   DocumentRead,
   HealthResponse,
-  ChatSessionUpdate,
+  UserLoginCreate,
+  UserRead,
+  UserRegisterCreate,
 } from "../types";
 
 const BACKEND_URL =
-  import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, "") ??
-  "http://localhost:8000";
+  import.meta.env.VITE_BACKEND_URL?.replace(
+    /\/$/,
+    "",
+  ) ?? "http://localhost:8000";
 
 const API_URL = `${BACKEND_URL}/api`;
 
-const backendClient: AxiosInstance = axios.create({
-  baseURL: BACKEND_URL,
-  timeout: 15_000,
-  headers: {
-    Accept: "application/json",
-  },
-});
+const backendClient: AxiosInstance =
+  axios.create({
+    baseURL: BACKEND_URL,
+    timeout: 15_000,
+    withCredentials: true,
+    headers: {
+      Accept: "application/json",
+    },
+  });
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_URL,
   timeout: 120_000,
+  withCredentials: true,
   headers: {
     Accept: "application/json",
   },
@@ -65,8 +74,22 @@ function getErrorMessage(
     return detail;
   }
 
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((issue) => issue.msg)
+      .filter(
+        (message): message is string =>
+          typeof message === "string",
+      );
+
+    if (messages.length > 0) {
+      return messages.join(" ");
+    }
+  }
+
   if (
     detail &&
+    !Array.isArray(detail) &&
     typeof detail === "object" &&
     typeof detail.message === "string"
   ) {
@@ -76,7 +99,9 @@ function getErrorMessage(
   return "Backend isteği tamamlanamadı.";
 }
 
-function normalizeApiError(error: unknown): ApiRequestError {
+function normalizeApiError(
+  error: unknown,
+): ApiRequestError {
   if (error instanceof ApiRequestError) {
     return error;
   }
@@ -133,12 +158,70 @@ async function executeRequest<T>(
   }
 }
 
-/* Health */
+export function isAuthenticationError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof ApiRequestError &&
+    error.status === 401
+  );
+}
 
-export function getBackendHealth(): Promise<HealthResponse> {
+/* Authentication */
+
+export function getCurrentUser():
+  Promise<UserRead> {
   return executeRequest(async () => {
     const response =
-      await backendClient.get<HealthResponse>("/health");
+      await apiClient.get<UserRead>("/auth/me");
+
+    return response.data;
+  });
+}
+
+export function registerUser(
+  data: UserRegisterCreate,
+): Promise<UserRead> {
+  return executeRequest(async () => {
+    const response =
+      await apiClient.post<UserRead>(
+        "/auth/register",
+        data,
+      );
+
+    return response.data;
+  });
+}
+
+export function loginUser(
+  data: UserLoginCreate,
+): Promise<UserRead> {
+  return executeRequest(async () => {
+    const response =
+      await apiClient.post<UserRead>(
+        "/auth/login",
+        data,
+      );
+
+    return response.data;
+  });
+}
+
+export function logoutUser(): Promise<void> {
+  return executeRequest(async () => {
+    await apiClient.post("/auth/logout");
+  });
+}
+
+/* Health */
+
+export function getBackendHealth():
+  Promise<HealthResponse> {
+  return executeRequest(async () => {
+    const response =
+      await backendClient.get<HealthResponse>(
+        "/health",
+      );
 
     return response.data;
   });
@@ -158,10 +241,13 @@ export function getDatabaseHealth():
 
 /* Documents */
 
-export function getDocuments(): Promise<DocumentRead[]> {
+export function getDocuments():
+  Promise<DocumentRead[]> {
   return executeRequest(async () => {
     const response =
-      await apiClient.get<DocumentRead[]>("/documents");
+      await apiClient.get<DocumentRead[]>(
+        "/documents",
+      );
 
     return response.data;
   });
@@ -179,6 +265,7 @@ export function getDocument(
     return response.data;
   });
 }
+
 export function deleteDocument(
   documentId: string,
 ): Promise<void> {
@@ -216,7 +303,9 @@ export function uploadDocument(
         "/documents",
         formData,
         {
-          onUploadProgress: (progressEvent) => {
+          onUploadProgress: (
+            progressEvent,
+          ) => {
             if (
               !onProgress ||
               !progressEvent.total
@@ -312,6 +401,21 @@ export function attachDocumentsToChatSession(
   });
 }
 
+export function getChatSessionDocuments(
+  sessionId: string,
+): Promise<ChatSessionDocumentRead[]> {
+  return executeRequest(async () => {
+    const response =
+      await apiClient.get<
+        ChatSessionDocumentRead[]
+      >(
+        `/chat/sessions/${sessionId}/documents`,
+      );
+
+    return response.data;
+  });
+}
+
 /* Chat messages */
 
 export function getChatMessages(
@@ -340,6 +444,20 @@ export function sendChatMessage(
       await apiClient.post<ChatResponse>(
         `/chat/sessions/${sessionId}/messages`,
         data,
+      );
+
+    return response.data;
+  });
+}
+
+export function getChatMessageSources(
+  sessionId: string,
+  messageId: string,
+): Promise<ChatSourceRead[]> {
+  return executeRequest(async () => {
+    const response =
+      await apiClient.get<ChatSourceRead[]>(
+        `/chat/sessions/${sessionId}/messages/${messageId}/sources`,
       );
 
     return response.data;
