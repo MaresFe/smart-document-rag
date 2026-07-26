@@ -11,5 +11,10 @@ pgvector
 PyMuPDF
 python-docx
 pandas
-openpyxlsentence-transformers
+openpyxl
+sentence-transformers
 httpx
+
+pwdlib[argon2]
+PyJWT
+email-validator

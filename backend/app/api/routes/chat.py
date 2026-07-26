@@ -1,14 +1,25 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Response,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.dependencies.auth import get_current_user
 from app.db.session import get_db
 from app.models.chat import ChatMessage, ChatSession
-from app.models.chat_session_document import ChatSessionDocument
+from app.models.chat_session_document import (
+    ChatSessionDocument,
+)
 from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
 from app.models.message_source import MessageSource
+from app.models.user import User
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageRead,
@@ -20,10 +31,12 @@ from app.schemas.chat import (
     ChatSessionUpdate,
     ChatSourceRead,
 )
-from app.services.dev_user import DEV_USER_ID, get_or_create_dev_user
 from app.services.embedding import EmbeddingError
-from app.services.retrieval import RetrievedChunk, retrieve_relevant_chunks
 from app.services.llm import LLMError, generate_answer
+from app.services.retrieval import (
+    RetrievedChunk,
+    retrieve_relevant_chunks,
+)
 
 
 router = APIRouter(
@@ -32,31 +45,57 @@ router = APIRouter(
 )
 
 
+def get_owned_chat_session(
+    db: Session,
+    session_id: UUID,
+    user_id: UUID,
+) -> ChatSession:
+    statement = select(ChatSession).where(
+        ChatSession.id == session_id,
+        ChatSession.user_id == user_id,
+    )
+
+    chat_session = db.scalar(statement)
+
+    if chat_session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found.",
+        )
+
+    return chat_session
+
+
 def build_retrieval_based_answer(
     question: str,
     retrieved_chunks: list[RetrievedChunk],
 ) -> str:
     if not retrieved_chunks:
         return (
-            "Bu soruyla ilgili yeterli doküman parçası bulunamadı. "
-            "Daha farklı bir soru sormayı veya daha ilgili bir doküman yüklemeyi deneyebilirsin."
+            "Bu soruyla ilgili seçili belgelerde yeterli bilgi "
+            "bulunamadı. Daha farklı bir soru sormayı veya ilgili "
+            "bir belge seçmeyi deneyebilirsin."
         )
 
     source_sections: list[str] = []
 
-    for index, result in enumerate(retrieved_chunks, start=1):
+    for index, result in enumerate(
+        retrieved_chunks,
+        start=1,
+    ):
         content = result.content.strip()
 
         if len(content) > 700:
             content = f"{content[:700]}..."
 
         source_sections.append(
-            f"[Kaynak {index} - {result.original_filename}]\n{content}"
+            f"[Kaynak {index} - "
+            f"{result.original_filename}]\n{content}"
         )
 
     return (
-        "Bu aşamada LLM cevap üretimi henüz eklenmedi. "
-        "Aşağıda soruyla en alakalı bulunan doküman parçalarını getiriyorum.\n\n"
+        "Yanıt modeli şu anda kullanılamıyor. "
+        "Soruyla en alakalı belge parçaları aşağıdadır.\n\n"
         f"Soru: {question}\n\n"
         + "\n\n".join(source_sections)
     )
@@ -70,78 +109,191 @@ def build_retrieval_based_answer(
 def create_chat_session(
     request: ChatSessionCreate,
     db: Session = Depends(get_db),
-):
-    get_or_create_dev_user(db)
-
-    session = ChatSession(
-        user_id=DEV_USER_ID,
-        title=request.title,
+    current_user: User = Depends(get_current_user),
+) -> ChatSession:
+    normalized_title = (
+        request.title.strip()
+        if request.title
+        else None
     )
 
-    db.add(session)
-    db.commit()
-    db.refresh(session)
+    chat_session = ChatSession(
+        user_id=current_user.id,
+        title=normalized_title or "Yeni sohbet",
+    )
 
-    return session
+    db.add(chat_session)
+    db.commit()
+    db.refresh(chat_session)
+
+    return chat_session
+
+
+@router.get(
+    "/sessions",
+    response_model=list[ChatSessionRead],
+)
+def list_chat_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ChatSession]:
+    statement = (
+        select(ChatSession)
+        .where(ChatSession.user_id == current_user.id)
+        .order_by(ChatSession.created_at.desc())
+    )
+
+    return list(db.scalars(statement).all())
+
+
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=ChatSessionRead,
+)
+def update_chat_session(
+    session_id: UUID,
+    request: ChatSessionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ChatSession:
+    chat_session = get_owned_chat_session(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
+
+    normalized_title = request.title.strip()
+
+    if not normalized_title:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Chat session title cannot be empty.",
+        )
+
+    chat_session.title = normalized_title
+
+    db.commit()
+    db.refresh(chat_session)
+
+    return chat_session
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_chat_session(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    chat_session = get_owned_chat_session(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
+
+    db.delete(chat_session)
+    db.commit()
+
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/documents",
+    response_model=list[ChatSessionDocumentRead],
+)
+def list_chat_session_documents(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ChatSessionDocument]:
+    get_owned_chat_session(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
+
+    statement = (
+        select(ChatSessionDocument)
+        .join(
+            Document,
+            Document.id
+            == ChatSessionDocument.document_id,
+        )
+        .where(
+            ChatSessionDocument.session_id == session_id,
+            Document.user_id == current_user.id,
+        )
+        .order_by(ChatSessionDocument.created_at)
+    )
+
+    return list(db.scalars(statement).all())
+
 
 @router.post(
     "/sessions/{session_id}/documents",
     response_model=list[ChatSessionDocumentRead],
-    status_code=status.HTTP_201_CREATED,
 )
 def attach_documents_to_chat_session(
     session_id: UUID,
     request: ChatSessionDocumentCreate,
     db: Session = Depends(get_db),
-):
-    session = db.get(ChatSession, session_id)
-
-    if session is None or session.user_id != DEV_USER_ID:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat session not found.",
-        )
-
-    unique_document_ids = list(dict.fromkeys(request.document_ids))
-
-    statement = select(Document).where(
-        Document.id.in_(unique_document_ids),
-        Document.user_id == DEV_USER_ID,
+    current_user: User = Depends(get_current_user),
+) -> list[ChatSessionDocument]:
+    get_owned_chat_session(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
     )
 
-    documents = db.execute(statement).scalars().all()
-    found_document_ids = {document.id for document in documents}
-
-    missing_document_ids = [
-        document_id
-        for document_id in unique_document_ids
-        if document_id not in found_document_ids
-    ]
-
-    if missing_document_ids:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "message": "One or more documents were not found.",
-                "document_ids": [
-                    str(document_id)
-                    for document_id in missing_document_ids
-                ],
-            },
-        )
-
-    existing_statement = select(ChatSessionDocument).where(
-        ChatSessionDocument.session_id == session_id
+    unique_document_ids = list(
+        dict.fromkeys(request.document_ids),
     )
 
-    existing_links = db.execute(existing_statement).scalars().all()
+    if unique_document_ids:
+        document_statement = select(Document).where(
+            Document.id.in_(unique_document_ids),
+            Document.user_id == current_user.id,
+        )
+
+        documents = list(
+            db.scalars(document_statement).all(),
+        )
+    else:
+        documents = []
+
+    found_document_ids = {
+        document.id
+        for document in documents
+    }
+
+    if len(found_document_ids) != len(unique_document_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more documents were not found.",
+        )
+
+    existing_statement = select(
+        ChatSessionDocument,
+    ).where(
+        ChatSessionDocument.session_id == session_id,
+    )
+
+    existing_links = list(
+        db.scalars(existing_statement).all(),
+    )
 
     existing_document_ids = {
         link.document_id
         for link in existing_links
     }
 
-    requested_document_ids = set(unique_document_ids)
+    requested_document_ids = set(
+        unique_document_ids,
+    )
 
     for link in existing_links:
         if link.document_id not in requested_document_ids:
@@ -157,82 +309,24 @@ def attach_documents_to_chat_session(
     ]
 
     db.add_all(new_links)
-    db.flush()
     db.commit()
 
     final_statement = (
         select(ChatSessionDocument)
+        .join(
+            Document,
+            Document.id
+            == ChatSessionDocument.document_id,
+        )
         .where(
-            ChatSessionDocument.session_id == session_id
+            ChatSessionDocument.session_id == session_id,
+            Document.user_id == current_user.id,
         )
         .order_by(ChatSessionDocument.created_at)
     )
 
-    return db.execute(final_statement).scalars().all()
+    return list(db.scalars(final_statement).all())
 
-
-@router.get("/sessions", response_model=list[ChatSessionRead])
-def list_chat_sessions(db: Session = Depends(get_db)):
-    statement = (
-        select(ChatSession)
-        .where(ChatSession.user_id == DEV_USER_ID)
-        .order_by(ChatSession.created_at.desc())
-    )
-
-    sessions = db.execute(statement).scalars().all()
-
-    return sessions
-
-@router.patch(
-    "/sessions/{session_id}",
-    response_model=ChatSessionRead,
-)
-def update_chat_session(
-    session_id: UUID,
-    request: ChatSessionUpdate,
-    db: Session = Depends(get_db),
-):
-    session = db.get(ChatSession, session_id)
-
-    if session is None or session.user_id != DEV_USER_ID:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat session not found.",
-        )
-
-    normalized_title = request.title.strip()
-
-    if not normalized_title:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Chat session title cannot be empty.",
-        )
-
-    session.title = normalized_title
-
-    db.commit()
-    db.refresh(session)
-
-    return session
-
-@router.delete(
-    "/sessions/{session_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_chat_session(
-    session_id: UUID,
-    db: Session = Depends(get_db),
-) -> None:
-    session = db.get(ChatSession, session_id)
-
-    if session is None or session.user_id != DEV_USER_ID:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat session not found.",
-        )
-
-    db.delete(session)
-    db.commit()
 
 @router.get(
     "/sessions/{session_id}/messages",
@@ -241,14 +335,13 @@ def delete_chat_session(
 def list_chat_messages(
     session_id: UUID,
     db: Session = Depends(get_db),
-):
-    session = db.get(ChatSession, session_id)
-
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat session not found.",
-        )
+    current_user: User = Depends(get_current_user),
+) -> list[ChatMessage]:
+    get_owned_chat_session(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
 
     statement = (
         select(ChatMessage)
@@ -256,9 +349,75 @@ def list_chat_messages(
         .order_by(ChatMessage.created_at)
     )
 
-    messages = db.execute(statement).scalars().all()
+    return list(db.scalars(statement).all())
 
-    return messages
+
+@router.get(
+    "/sessions/{session_id}/messages/"
+    "{message_id}/sources",
+    response_model=list[ChatSourceRead],
+)
+def list_chat_message_sources(
+    session_id: UUID,
+    message_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ChatSourceRead]:
+    get_owned_chat_session(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
+
+    message_statement = select(ChatMessage).where(
+        ChatMessage.id == message_id,
+        ChatMessage.session_id == session_id,
+    )
+
+    message = db.scalar(message_statement)
+
+    if message is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat message not found.",
+        )
+
+    source_statement = (
+        select(
+            MessageSource,
+            DocumentChunk,
+            Document.original_filename,
+        )
+        .join(
+            DocumentChunk,
+            DocumentChunk.id == MessageSource.chunk_id,
+        )
+        .join(
+            Document,
+            Document.id == DocumentChunk.document_id,
+        )
+        .where(
+            MessageSource.message_id == message_id,
+            Document.user_id == current_user.id,
+        )
+        .order_by(
+            MessageSource.similarity_score.desc(),
+        )
+    )
+
+    rows = db.execute(source_statement).all()
+
+    return [
+        ChatSourceRead(
+            chunk_id=chunk.id,
+            document_id=chunk.document_id,
+            chunk_index=chunk.chunk_index,
+            content=chunk.content,
+            similarity_score=source.similarity_score,
+            original_filename=original_filename,
+        )
+        for source, chunk, original_filename in rows
+    ]
 
 
 @router.post(
@@ -270,60 +429,87 @@ def create_chat_message(
     session_id: UUID,
     request: ChatMessageCreate,
     db: Session = Depends(get_db),
-):
-    session = db.get(ChatSession, session_id)
+    current_user: User = Depends(get_current_user),
+) -> ChatResponse:
+    chat_session = get_owned_chat_session(
+        db=db,
+        session_id=session_id,
+        user_id=current_user.id,
+    )
 
-    if session is None:
+    normalized_content = request.content.strip()
+
+    if not normalized_content:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat session not found.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Message content cannot be empty.",
         )
 
     user_message = ChatMessage(
-        session_id=session.id,
+        session_id=chat_session.id,
         role="user",
-        content=request.content,
+        content=normalized_content,
     )
 
     db.add(user_message)
     db.flush()
 
-    linked_documents_statement = select(
-        ChatSessionDocument.document_id
-    ).where(
-        ChatSessionDocument.session_id == session.id
+    linked_documents_statement = (
+        select(Document.id)
+        .join(
+            ChatSessionDocument,
+            ChatSessionDocument.document_id
+            == Document.id,
+        )
+        .where(
+            ChatSessionDocument.session_id
+            == chat_session.id,
+            Document.user_id == current_user.id,
+            Document.status == "ready",
+        )
     )
 
     linked_document_ids = list(
-        db.execute(linked_documents_statement).scalars().all()
+        db.scalars(
+            linked_documents_statement,
+        ).all(),
     )
 
     try:
         retrieved_chunks = retrieve_relevant_chunks(
             db=db,
-            query=request.content,
+            query=normalized_content,
+            user_id=current_user.id,
             limit=5,
             document_ids=linked_document_ids,
         )
     except EmbeddingError as error:
+        db.rollback()
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(error),
         ) from error
 
-    try:
-        assistant_content = generate_answer(
-            question=request.content,
-            retrieved_chunks=retrieved_chunks,
-        )
-    except LLMError:
+    if retrieved_chunks:
+        try:
+            assistant_content = generate_answer(
+                question=normalized_content,
+                retrieved_chunks=retrieved_chunks,
+            )
+        except LLMError:
+            assistant_content = build_retrieval_based_answer(
+                question=normalized_content,
+                retrieved_chunks=retrieved_chunks,
+            )
+    else:
         assistant_content = build_retrieval_based_answer(
-            question=request.content,
-            retrieved_chunks=retrieved_chunks,
-    )
+            question=normalized_content,
+            retrieved_chunks=[],
+        )
 
     assistant_message = ChatMessage(
-        session_id=session.id,
+        session_id=chat_session.id,
         role="assistant",
         content=assistant_content,
     )

@@ -22,15 +22,20 @@ class RetrievedChunk:
 def retrieve_relevant_chunks(
     db: Session,
     query: str,
+    user_id: UUID,
     limit: int = 5,
     document_ids: list[UUID] | None = None,
 ) -> list[RetrievedChunk]:
     if document_ids is not None and not document_ids:
         return []
 
+    safe_limit = min(max(limit, 1), 20)
+
     query_embedding = create_query_embedding(query)
 
-    distance = DocumentChunk.embedding.cosine_distance(query_embedding)
+    distance = DocumentChunk.embedding.cosine_distance(
+        query_embedding,
+    )
 
     statement = (
         select(
@@ -38,8 +43,12 @@ def retrieve_relevant_chunks(
             Document.original_filename,
             distance.label("distance"),
         )
-        .join(Document, Document.id == DocumentChunk.document_id)
+        .join(
+            Document,
+            Document.id == DocumentChunk.document_id,
+        )
         .where(
+            Document.user_id == user_id,
             DocumentChunk.embedding.is_not(None),
             Document.status == "ready",
         )
@@ -47,10 +56,14 @@ def retrieve_relevant_chunks(
 
     if document_ids is not None:
         statement = statement.where(
-            DocumentChunk.document_id.in_(document_ids)
+            DocumentChunk.document_id.in_(document_ids),
         )
 
-    statement = statement.order_by(distance).limit(limit)
+    statement = (
+        statement
+        .order_by(distance)
+        .limit(safe_limit)
+    )
 
     rows = db.execute(statement).all()
 

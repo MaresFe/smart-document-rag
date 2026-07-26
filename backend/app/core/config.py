@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,12 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:3b"
     llm_timeout_seconds: int = 120
+
+    auth_secret_key: SecretStr
+    auth_algorithm: str = "HS256"
+    auth_access_token_minutes: int = 60
+    auth_cookie_name: str = "smart_rag_access_token"
+    auth_cookie_secure: bool = False
 
     allowed_file_extensions: set[str] = {
         "pdf",

@@ -13,22 +13,50 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.dependencies.auth import get_current_user
 from app.db.session import get_db
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
+from app.models.user import User
 from app.schemas.document import DocumentRead
 from app.schemas.document_chunk import DocumentChunkRead
 from app.services.chunking import chunk_text
-from app.services.dev_user import DEV_USER_ID, get_or_create_dev_user
 from app.services.document_upload import save_upload_file
-from app.services.embedding import EmbeddingError, create_passage_embeddings
-from app.services.text_extraction import TextExtractionError, extract_text_from_document
+from app.services.embedding import (
+    EmbeddingError,
+    create_passage_embeddings,
+)
+from app.services.text_extraction import (
+    TextExtractionError,
+    extract_text_from_document,
+)
 
 
 router = APIRouter(
     prefix="/documents",
     tags=["Documents"],
 )
+
+
+def get_owned_document(
+    db: Session,
+    document_id: UUID,
+    user_id: UUID,
+) -> Document:
+    statement = select(Document).where(
+        Document.id == document_id,
+        Document.user_id == user_id,
+    )
+
+    document = db.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    return document
 
 
 @router.post(
@@ -39,14 +67,20 @@ router = APIRouter(
 def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-):
-    get_or_create_dev_user(db)
-
-    stored_filename, storage_path, file_size, file_type = save_upload_file(file)
+    current_user: User = Depends(get_current_user),
+) -> Document:
+    (
+        stored_filename,
+        storage_path,
+        file_size,
+        file_type,
+    ) = save_upload_file(file)
 
     document = Document(
-        user_id=DEV_USER_ID,
-        original_filename=file.filename,
+        user_id=current_user.id,
+        original_filename=(
+            file.filename or stored_filename
+        ),
         stored_filename=stored_filename,
         file_type=file_type,
         mime_type=file.content_type,
@@ -68,7 +102,9 @@ def upload_document(
         chunks = chunk_text(extracted_text)
 
         if not chunks:
-            raise TextExtractionError("No extractable text found in document.")
+            raise TextExtractionError(
+                "No extractable text found in document.",
+            )
 
         embeddings = create_passage_embeddings(chunks)
 
@@ -80,7 +116,9 @@ def upload_document(
                 embedding=embeddings[index],
                 source_metadata={
                     "file_type": document.file_type,
-                    "original_filename": document.original_filename,
+                    "original_filename": (
+                        document.original_filename
+                    ),
                 },
             )
             for index, chunk in enumerate(chunks)
@@ -104,41 +142,53 @@ def upload_document(
     return document
 
 
-@router.get("", response_model=list[DocumentRead])
-def list_documents(db: Session = Depends(get_db)):
-    statement = select(Document).order_by(Document.created_at.desc())
-    documents = db.execute(statement).scalars().all()
-    return documents
+@router.get(
+    "",
+    response_model=list[DocumentRead],
+)
+def list_documents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[Document]:
+    statement = (
+        select(Document)
+        .where(Document.user_id == current_user.id)
+        .order_by(Document.created_at.desc())
+    )
+
+    return list(db.scalars(statement).all())
 
 
-@router.get("/{document_id}", response_model=DocumentRead)
+@router.get(
+    "/{document_id}",
+    response_model=DocumentRead,
+)
 def get_document(
     document_id: UUID,
     db: Session = Depends(get_db),
-):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found.",
-        )
-
-    return document
+    current_user: User = Depends(get_current_user),
+) -> Document:
+    return get_owned_document(
+        db=db,
+        document_id=document_id,
+        user_id=current_user.id,
+    )
 
 
-@router.get("/{document_id}/chunks", response_model=list[DocumentChunkRead])
+@router.get(
+    "/{document_id}/chunks",
+    response_model=list[DocumentChunkRead],
+)
 def list_document_chunks(
     document_id: UUID,
     db: Session = Depends(get_db),
-):
-    document = db.get(Document, document_id)
-
-    if document is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found.",
-        )
+    current_user: User = Depends(get_current_user),
+) -> list[DocumentChunk]:
+    get_owned_document(
+        db=db,
+        document_id=document_id,
+        user_id=current_user.id,
+    )
 
     statement = (
         select(DocumentChunk)
@@ -146,9 +196,9 @@ def list_document_chunks(
         .order_by(DocumentChunk.chunk_index)
     )
 
-    chunks = db.execute(statement).scalars().all()
+    return list(db.scalars(statement).all())
 
-    return chunks
+
 @router.delete(
     "/{document_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -156,14 +206,13 @@ def list_document_chunks(
 def delete_document(
     document_id: UUID,
     db: Session = Depends(get_db),
-):
-    document = db.get(Document, document_id)
-
-    if document is None or document.user_id != DEV_USER_ID:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found.",
-        )
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    document = get_owned_document(
+        db=db,
+        document_id=document_id,
+        user_id=current_user.id,
+    )
 
     storage_path = Path(document.storage_path)
 
