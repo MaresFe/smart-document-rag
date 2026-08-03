@@ -8,9 +8,12 @@ import type {
   UserRegisterCreate,
 } from "../types";
 
+import ThemeToggle from "./ThemeToggle";
+
 type AuthMode = "login" | "register";
 
 interface AuthScreenProps {
+  dark: boolean;
   submitting: boolean;
   error: string | null;
   onLogin: (
@@ -20,14 +23,17 @@ interface AuthScreenProps {
     registration: UserRegisterCreate,
   ) => Promise<void>;
   onClearError: () => void;
+  onThemeToggle: () => void;
 }
 
 function AuthScreen({
+  dark,
   submitting,
   error,
   onLogin,
   onRegister,
   onClearError,
+  onThemeToggle,
 }: AuthScreenProps) {
   const [mode, setMode] =
     useState<AuthMode>("login");
@@ -116,6 +122,12 @@ function AuthScreen({
 
   return (
     <main className="auth-screen">
+      <div className="auth-theme-control">
+  <ThemeToggle
+    dark={dark}
+    onToggle={onThemeToggle}
+  />
+</div>
       <section className="auth-card">
         <div className="auth-brand-panel">
           <img

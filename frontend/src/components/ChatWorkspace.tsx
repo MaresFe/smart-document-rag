@@ -21,14 +21,22 @@ interface ChatWorkspaceProps {
   error: string | null;
   onSendMessage: (content: string) => Promise<void>;
   onUploadClick: () => void;
+  selectedSourceMessageId: string | null;
+  sourcesLoading: boolean;
+  onAssistantMessageSelect: (
+    messageId: string,
+  ) => Promise<void>;
 }
+
+const MINIMUM_MEANINGFUL_CHARACTERS = 2;
 
 const suggestions = [
   {
     id: "key-points",
     icon: <ListChecks size={18} />,
     title: "Ana maddeleri çıkar",
-    description: "Seçili belgelerdeki en önemli noktaları listele.",
+    description:
+      "Seçili belgelerdeki en önemli noktaları listele.",
     prompt:
       "Seçili belgelerdeki en önemli maddeleri kısa ve anlaşılır biçimde listele.",
   },
@@ -36,7 +44,8 @@ const suggestions = [
     id: "summarize",
     icon: <FileSearch size={18} />,
     title: "Belgeyi özetle",
-    description: "İçeriği kısa ve anlaşılır biçimde özetle.",
+    description:
+      "İçeriği kısa ve anlaşılır biçimde özetle.",
     prompt:
       "Seçili belgelerin ana konularını ve önemli sonuçlarını özetle.",
   },
@@ -44,11 +53,20 @@ const suggestions = [
     id: "explain",
     icon: <Lightbulb size={18} />,
     title: "Kavramları açıkla",
-    description: "Teknik terimleri bağlamıyla birlikte açıkla.",
+    description:
+      "Teknik terimleri bağlamıyla birlikte açıkla.",
     prompt:
       "Seçili belgelerde geçen önemli teknik kavramları basit bir dille açıkla.",
   },
 ];
+
+function countMeaningfulCharacters(
+  value: string,
+): number {
+  return (
+    value.match(/[\p{L}\p{N}]/gu)?.length ?? 0
+  );
+}
 
 function ChatWorkspace({
   messages,
@@ -58,16 +76,33 @@ function ChatWorkspace({
   error,
   onSendMessage,
   onUploadClick,
+  selectedSourceMessageId,
+  sourcesLoading,
+  onAssistantMessageSelect,
 }: ChatWorkspaceProps) {
   const [prompt, setPrompt] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef =
+    useRef<HTMLTextAreaElement>(null);
+
+  const normalizedPrompt = prompt.trim();
+
+  const meaningfulCharacterCount =
+    countMeaningfulCharacters(
+      normalizedPrompt,
+    );
+
+  const promptIsMeaningful =
+    meaningfulCharacterCount >=
+    MINIMUM_MEANINGFUL_CHARACTERS;
 
   const canSubmit =
-    prompt.trim().length > 0 &&
+    promptIsMeaningful &&
     selectedDocumentCount > 0 &&
     !sending;
 
-  function selectSuggestion(suggestionPrompt: string) {
+  function selectSuggestion(
+    suggestionPrompt: string,
+  ) {
     setPrompt(suggestionPrompt);
 
     requestAnimationFrame(() => {
@@ -80,19 +115,47 @@ function ChatWorkspace({
   }
 
   async function submitPrompt() {
-    const normalizedPrompt = prompt.trim();
+    const submittedPrompt = prompt.trim();
 
-    if (!normalizedPrompt || sending) {
-      return;
-    }
-
-    if (selectedDocumentCount === 0) {
+    if (
+      sending ||
+      selectedDocumentCount === 0 ||
+      countMeaningfulCharacters(
+        submittedPrompt,
+      ) < MINIMUM_MEANINGFUL_CHARACTERS
+    ) {
       return;
     }
 
     setPrompt("");
 
-    await onSendMessage(normalizedPrompt);
+    await onSendMessage(submittedPrompt);
+  }
+
+  function getComposerHint(): string {
+    if (sending) {
+      return "Yanıt hazırlanıyor...";
+    }
+
+    if (
+      normalizedPrompt &&
+      !promptIsMeaningful
+    ) {
+      return "En az 2 harf veya rakam yazmalısın.";
+    }
+
+    if (prompt.length > 0) {
+      return (
+        `${prompt.length} karakter · ` +
+        "Enter gönderir · " +
+        "Shift + Enter yeni satır"
+      );
+    }
+
+    return (
+      "Yanıtlar yalnızca seçili " +
+      "kaynaklara dayanır."
+    );
   }
 
   return (
@@ -103,29 +166,43 @@ function ChatWorkspace({
         </div>
 
         <div>
-          <p className="eyebrow">Belge Asistanı</p>
+          <p className="eyebrow">
+            Belge Asistanı
+          </p>
+
           <h1>Belgelerinle konuş.</h1>
 
           <p className="chat-hero-description">
-            Seçili kaynaklar üzerinde semantik arama yap, özet çıkar
-            ve güvenilir yanıtları kaynaklarıyla birlikte incele.
+            Seçili kaynaklar üzerinde semantik
+            arama yap, özet çıkar ve güvenilir
+            yanıtları kaynaklarıyla birlikte
+            incele.
           </p>
         </div>
       </section>
 
       {loading ? (
         <section className="chat-loading-state">
-          <LoaderCircle className="spinning-icon" size={24} />
-          <span>Sohbet geçmişi yükleniyor...</span>
+          <LoaderCircle
+            className="spinning-icon"
+            size={24}
+          />
+
+          <span>
+            Sohbet geçmişi yükleniyor...
+          </span>
         </section>
       ) : messages.length === 0 ? (
         <section className="suggestion-section">
           <div className="section-heading-row">
             <div>
-              <h2>Başlamak için bir soru seç</h2>
+              <h2>
+                Başlamak için bir soru seç
+              </h2>
 
               <p>
-                İstersen aşağıdaki örneklerden biriyle başlayabilirsin.
+                İstersen aşağıdaki örneklerden
+                biriyle başlayabilirsin.
               </p>
             </div>
 
@@ -136,24 +213,37 @@ function ChatWorkspace({
           </div>
 
           <div className="suggestion-grid">
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion.id}
-                className="suggestion-card"
-                type="button"
-                disabled={selectedDocumentCount === 0}
-                onClick={() => selectSuggestion(suggestion.prompt)}
-              >
-                <span className="suggestion-icon">
-                  {suggestion.icon}
-                </span>
+            {suggestions.map(
+              (suggestion) => (
+                <button
+                  key={suggestion.id}
+                  className="suggestion-card"
+                  type="button"
+                  disabled={
+                    selectedDocumentCount === 0
+                  }
+                  onClick={() =>
+                    selectSuggestion(
+                      suggestion.prompt,
+                    )
+                  }
+                >
+                  <span className="suggestion-icon">
+                    {suggestion.icon}
+                  </span>
 
-                <span className="suggestion-copy">
-                  <strong>{suggestion.title}</strong>
-                  <span>{suggestion.description}</span>
-                </span>
-              </button>
-            ))}
+                  <span className="suggestion-copy">
+                    <strong>
+                      {suggestion.title}
+                    </strong>
+
+                    <span>
+                      {suggestion.description}
+                    </span>
+                  </span>
+                </button>
+              ),
+            )}
           </div>
         </section>
       ) : (
@@ -169,7 +259,15 @@ function ChatWorkspace({
               </div>
             ) : (
               <div
-                className="demo-assistant-message"
+                className={[
+                  "demo-assistant-message",
+                  selectedSourceMessageId ===
+                  message.id
+                    ? "source-message-selected"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 key={message.id}
               >
                 <div className="demo-assistant-avatar">
@@ -179,6 +277,34 @@ function ChatWorkspace({
                 <div>
                   <span>Belge Asistanı</span>
                   <p>{message.content}</p>
+
+                  <button
+                    className="message-source-button"
+                    type="button"
+                    aria-pressed={
+                      selectedSourceMessageId ===
+                      message.id
+                    }
+                    disabled={
+                      sourcesLoading &&
+                      selectedSourceMessageId ===
+                        message.id
+                    }
+                    onClick={() => {
+                      void onAssistantMessageSelect(
+                        message.id,
+                      );
+                    }}
+                  >
+                    {sourcesLoading &&
+                    selectedSourceMessageId ===
+                      message.id
+                      ? "Kaynaklar yükleniyor..."
+                      : selectedSourceMessageId ===
+                          message.id
+                        ? "Kaynaklar gösteriliyor"
+                        : "Kaynakları göster"}
+                  </button>
                 </div>
               </div>
             ),
@@ -195,7 +321,11 @@ function ChatWorkspace({
 
               <div>
                 <span>Belge Asistanı</span>
-                <p>Belgeler inceleniyor ve yanıt hazırlanıyor...</p>
+
+                <p>
+                  Belgeler inceleniyor ve yanıt
+                  hazırlanıyor...
+                </p>
               </div>
             </div>
           )}
@@ -203,14 +333,18 @@ function ChatWorkspace({
       )}
 
       {error && (
-        <div className="chat-api-error" role="alert">
+        <div
+          className="chat-api-error"
+          role="alert"
+        >
           {error}
         </div>
       )}
 
       {selectedDocumentCount === 0 && (
         <div className="chat-selection-warning">
-          Mesaj göndermek için sol panelden en az bir hazır belge seç.
+          Mesaj göndermek için sol panelden en
+          az bir hazır belge seç.
         </div>
       )}
 
@@ -225,17 +359,19 @@ function ChatWorkspace({
             placeholder="Belgeler hakkında soru sor..."
             rows={2}
             disabled={sending}
-            onChange={(event) => setPrompt(event.target.value)}
-        onKeyDown={(event) => {
-  if (
-    event.key === "Enter" &&
-    !event.shiftKey &&
-    !event.nativeEvent.isComposing
-  ) {
-    event.preventDefault();
-    void submitPrompt();
-  }
-}}
+            onChange={(event) =>
+              setPrompt(event.target.value)
+            }
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                void submitPrompt();
+              }
+            }}
           />
 
           <div className="composer-footer">
@@ -250,11 +386,7 @@ function ChatWorkspace({
             </button>
 
             <span className="composer-hint">
-              {sending
-                ? "Yanıt hazırlanıyor..."
-                : prompt.length > 0
-? `${prompt.length} karakter · Enter gönderir · Shift + Enter yeni satır`
-: "Yanıtlar yalnızca seçili kaynaklara dayanır."}
+              {getComposerHint()}
             </span>
 
             <button
@@ -273,14 +405,18 @@ function ChatWorkspace({
                   size={19}
                 />
               ) : (
-                <ArrowUp size={19} strokeWidth={2.4} />
+                <ArrowUp
+                  size={19}
+                  strokeWidth={2.4}
+                />
               )}
             </button>
           </div>
         </div>
 
         <p className="composer-disclaimer">
-          Yapay zekâ yanıtlarını kritik kullanım öncesinde doğrulayın.
+          Yapay zekâ yanıtlarını kritik kullanım
+          öncesinde doğrulayın.
         </p>
       </section>
     </div>

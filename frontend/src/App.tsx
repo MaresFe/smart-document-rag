@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -12,6 +13,9 @@ import ChatWorkspace from "./components/ChatWorkspace";
 import SourceInspector from "./components/SourceInspector";
 import SourceSidebar from "./components/SourceSidebar";
 import UploadModal from "./components/UploadModal";
+import WorkspaceDialog, {
+  type WorkspaceDialogState,
+} from "./components/WorkspaceDialog";
 
 import {
   attachDocumentsToChatSession,
@@ -97,6 +101,9 @@ function App() {
   const [uploadModalOpen, setUploadModalOpen] =
     useState(false);
 
+  const [workspaceDialog, setWorkspaceDialog] =
+    useState<WorkspaceDialogState | null>(null);
+
   const [documents, setDocuments] =
     useState<DocumentRead[]>([]);
 
@@ -108,6 +115,16 @@ function App() {
 
   const [sources, setSources] =
     useState<ChatSourceRead[]>([]);
+
+  const [
+    selectedSourceMessageId,
+    setSelectedSourceMessageId,
+  ] = useState<string | null>(null);
+
+  const [sourcesLoading, setSourcesLoading] =
+    useState(false);
+
+  const sourceRequestIdRef = useRef(0);
 
   const [
     selectedDocumentIds,
@@ -152,15 +169,25 @@ function App() {
 
   const dark = theme === "dark";
 
+  const workspaceDialogBusy =
+    deletingDocumentId !== null ||
+    deletingSessionId !== null ||
+    renamingSessionId !== null;
+
   const resetWorkspace = useCallback(() => {
     setDocuments([]);
     setSessions([]);
     setMessages([]);
     setSources([]);
+    setSelectedSourceMessageId(null);
+    setSourcesLoading(false);
     setSelectedDocumentIds([]);
     setActiveSessionId(null);
 
+    sourceRequestIdRef.current += 1;
+
     setUploadModalOpen(false);
+    setWorkspaceDialog(null);
     setInitialLoading(true);
     setMessagesLoading(false);
     setCreatingSession(false);
@@ -353,9 +380,18 @@ function App() {
   ]);
 
   useEffect(() => {
+    sourceRequestIdRef.current += 1;
+
+    const sourceRequestId =
+      sourceRequestIdRef.current;
+
     setSources([]);
+    setSelectedSourceMessageId(null);
+    setSourcesLoading(false);
 
     if (!currentUser) {
+      setMessages([]);
+      setSelectedDocumentIds([]);
       return;
     }
 
@@ -363,6 +399,9 @@ function App() {
       setMessages([]);
       return;
     }
+
+    setMessages([]);
+    setSelectedDocumentIds([]);
 
     const sessionId = activeSessionId;
     let active = true;
@@ -408,6 +447,11 @@ function App() {
           return;
         }
 
+        setSelectedSourceMessageId(
+          lastAssistantMessage.id,
+        );
+        setSourcesLoading(true);
+
         try {
           const loadedSources =
             await getChatMessageSources(
@@ -415,11 +459,19 @@ function App() {
               lastAssistantMessage.id,
             );
 
-          if (active) {
+          if (
+            active &&
+            sourceRequestIdRef.current ===
+              sourceRequestId
+          ) {
             setSources(loadedSources);
           }
         } catch (error) {
-          if (!active) {
+          if (
+            !active ||
+            sourceRequestIdRef.current !==
+              sourceRequestId
+          ) {
             return;
           }
 
@@ -432,6 +484,14 @@ function App() {
             setChatError(
               "Sohbet yüklendi ancak eski kaynaklar alınamadı.",
             );
+          }
+        } finally {
+          if (
+            active &&
+            sourceRequestIdRef.current ===
+              sourceRequestId
+          ) {
+            setSourcesLoading(false);
           }
         }
       } catch (error) {
@@ -577,54 +637,13 @@ function App() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `"${documentToDelete.original_filename}" belgesini silmek istediğine emin misin?\n\nBu işlem geri alınamaz.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setDeletingDocumentId(documentId);
     setSidebarError(null);
-
-    try {
-      await deleteDocument(documentId);
-
-      setDocuments(
-        (currentDocuments) =>
-          currentDocuments.filter(
-            (document) =>
-              document.id !==
-              documentId,
-          ),
-      );
-
-      setSelectedDocumentIds(
-        (currentIds) =>
-          currentIds.filter(
-            (id) => id !== documentId,
-          ),
-      );
-
-      setSources((currentSources) =>
-        currentSources.filter(
-          (source) =>
-            source.document_id !==
-            documentId,
-        ),
-      );
-    } catch (error) {
-      if (
-        !handleAuthenticationFailure(error)
-      ) {
-        setSidebarError(
-          getErrorMessage(error),
-        );
-      }
-    } finally {
-      setDeletingDocumentId(null);
-    }
+    setWorkspaceDialog({
+      type: "delete-document",
+      targetId: documentId,
+      targetName:
+        documentToDelete.original_filename,
+    });
   }
 
   async function handleDeleteSession(
@@ -648,52 +667,12 @@ function App() {
       sessionToDelete.title ||
       "Başlıksız sohbet";
 
-    const confirmed = window.confirm(
-      `"${sessionTitle}" sohbetini silmek istediğine emin misin?\n\nBu işlem geri alınamaz.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setDeletingSessionId(sessionId);
     setSidebarError(null);
-
-    try {
-      await deleteChatSession(sessionId);
-
-      const remainingSessions =
-        sessions.filter(
-          (session) =>
-            session.id !== sessionId,
-        );
-
-      setSessions(remainingSessions);
-
-      if (
-        activeSessionId === sessionId
-      ) {
-        const nextSession =
-          remainingSessions[0] ?? null;
-
-        setActiveSessionId(
-          nextSession?.id ?? null,
-        );
-
-        setMessages([]);
-        setSources([]);
-      }
-    } catch (error) {
-      if (
-        !handleAuthenticationFailure(error)
-      ) {
-        setSidebarError(
-          getErrorMessage(error),
-        );
-      }
-    } finally {
-      setDeletingSessionId(null);
-    }
+    setWorkspaceDialog({
+      type: "delete-session",
+      targetId: sessionId,
+      targetName: sessionTitle,
+    });
   }
 
   async function handleRenameSession(
@@ -717,61 +696,139 @@ function App() {
       sessionToRename.title ||
       "Başlıksız sohbet";
 
-    const requestedTitle =
-      window.prompt(
-        "Sohbet için yeni bir ad gir:",
-        currentTitle,
-      );
+    setSidebarError(null);
+    setWorkspaceDialog({
+      type: "rename-session",
+      targetId: sessionId,
+      targetName: currentTitle,
+    });
+  }
 
-    if (requestedTitle === null) {
-      return;
+  async function confirmWorkspaceDialog(
+    value: string,
+  ): Promise<boolean> {
+    if (!workspaceDialog) {
+      return false;
     }
 
-    const normalizedTitle =
-      requestedTitle.trim();
+    const { type, targetId, targetName } =
+      workspaceDialog;
+
+    setSidebarError(null);
+
+    if (type === "delete-document") {
+      setDeletingDocumentId(targetId);
+
+      try {
+        await deleteDocument(targetId);
+
+        setDocuments((currentDocuments) =>
+          currentDocuments.filter(
+            (document) =>
+              document.id !== targetId,
+          ),
+        );
+
+        setSelectedDocumentIds((currentIds) =>
+          currentIds.filter(
+            (id) => id !== targetId,
+          ),
+        );
+
+        setSources((currentSources) =>
+          currentSources.filter(
+            (source) =>
+              source.document_id !== targetId,
+          ),
+        );
+
+        return true;
+      } catch (error) {
+        if (!handleAuthenticationFailure(error)) {
+          setSidebarError(getErrorMessage(error));
+        }
+
+        return false;
+      } finally {
+        setDeletingDocumentId(null);
+      }
+    }
+
+    if (type === "delete-session") {
+      setDeletingSessionId(targetId);
+
+      try {
+        await deleteChatSession(targetId);
+
+        const remainingSessions =
+          sessions.filter(
+            (session) => session.id !== targetId,
+          );
+
+        setSessions(remainingSessions);
+
+        if (activeSessionId === targetId) {
+          const nextSession =
+            remainingSessions[0] ?? null;
+
+          sourceRequestIdRef.current += 1;
+          setSelectedSourceMessageId(null);
+          setSourcesLoading(false);
+          setActiveSessionId(
+            nextSession?.id ?? null,
+          );
+          setMessages([]);
+          setSources([]);
+        }
+
+        return true;
+      } catch (error) {
+        if (!handleAuthenticationFailure(error)) {
+          setSidebarError(getErrorMessage(error));
+        }
+
+        return false;
+      } finally {
+        setDeletingSessionId(null);
+      }
+    }
+
+    const normalizedTitle = value.trim();
 
     if (!normalizedTitle) {
       setSidebarError(
         "Sohbet adı boş bırakılamaz.",
       );
-      return;
+      return false;
     }
 
-    if (
-      normalizedTitle === currentTitle
-    ) {
-      return;
+    if (normalizedTitle === targetName) {
+      return true;
     }
 
-    setRenamingSessionId(sessionId);
-    setSidebarError(null);
+    setRenamingSessionId(targetId);
 
     try {
       const updatedSession =
-        await updateChatSession(
-          sessionId,
-          {
-            title: normalizedTitle,
-          },
-        );
+        await updateChatSession(targetId, {
+          title: normalizedTitle,
+        });
 
-      setSessions(
-        (currentSessions) =>
-          currentSessions.map(
-            (session) =>
-              session.id === sessionId
-                ? updatedSession
-                : session,
-          ),
+      setSessions((currentSessions) =>
+        currentSessions.map((session) =>
+          session.id === targetId
+            ? updatedSession
+            : session,
+        ),
       );
+
+      return true;
     } catch (error) {
-      if (
-        !handleAuthenticationFailure(error)
-      ) {
-        setSidebarError(
-          getErrorMessage(error),
-        );
+      if (!handleAuthenticationFailure(error)) {
+        setSidebarError(getErrorMessage(error));
       }
+
+      return false;
     } finally {
       setRenamingSessionId(null);
     }
@@ -807,6 +864,10 @@ function App() {
       setActiveSessionId(session.id);
       setMessages([]);
       setSources([]);
+      setSelectedSourceMessageId(null);
+      setSourcesLoading(false);
+
+      sourceRequestIdRef.current += 1;
 
       return session;
     } catch (error) {
@@ -902,6 +963,65 @@ function App() {
     }
   }
 
+  async function handleAssistantMessageSelect(
+    messageId: string,
+  ): Promise<void> {
+    if (!activeSessionId) {
+      return;
+    }
+
+    const sessionId = activeSessionId;
+    const requestId =
+      sourceRequestIdRef.current + 1;
+
+    sourceRequestIdRef.current = requestId;
+
+    setSelectedSourceMessageId(messageId);
+    setSourcesLoading(true);
+    setSources([]);
+    setChatError(null);
+
+    try {
+      const loadedSources =
+        await getChatMessageSources(
+          sessionId,
+          messageId,
+        );
+
+      if (
+        sourceRequestIdRef.current !==
+        requestId
+      ) {
+        return;
+      }
+
+      setSources(loadedSources);
+    } catch (error) {
+      if (
+        sourceRequestIdRef.current !==
+        requestId
+      ) {
+        return;
+      }
+
+      if (
+        !handleAuthenticationFailure(error)
+      ) {
+        setSources([]);
+        setChatError(
+          "Bu cevabın kaynakları alınamadı.",
+        );
+      }
+    } finally {
+      if (
+        sourceRequestIdRef.current ===
+        requestId
+      ) {
+        setSourcesLoading(false);
+      }
+    }
+  }
+
   async function handleSendMessage(
     content: string,
   ): Promise<void> {
@@ -926,6 +1046,10 @@ function App() {
     setSendingMessage(true);
     setChatError(null);
     setSources([]);
+    setSelectedSourceMessageId(null);
+    setSourcesLoading(false);
+
+    sourceRequestIdRef.current += 1;
 
     try {
       let sessionId =
@@ -965,6 +1089,13 @@ function App() {
         messageDocumentIds,
       );
 
+      sourceRequestIdRef.current += 1;
+
+      setSelectedSourceMessageId(
+        response.assistant_message.id,
+      );
+
+      setSourcesLoading(false);
       setSources(response.sources);
 
       setSessions((currentSessions) => {
@@ -1014,15 +1145,17 @@ function App() {
 
   if (!currentUser) {
     return (
-      <AuthScreen
-        submitting={authSubmitting}
-        error={authError}
-        onLogin={handleLogin}
-        onRegister={handleRegister}
-        onClearError={() =>
-          setAuthError(null)
-        }
-      />
+    <AuthScreen
+  dark={dark}
+  submitting={authSubmitting}
+  error={authError}
+  onLogin={handleLogin}
+  onRegister={handleRegister}
+  onClearError={() =>
+    setAuthError(null)
+  }
+  onThemeToggle={toggleTheme}
+/>
     );
   }
 
@@ -1103,6 +1236,10 @@ function App() {
         <main className="chat-workspace">
           <ChatWorkspace
             messages={messages}
+            selectedSourceMessageId={
+              selectedSourceMessageId
+            }
+            sourcesLoading={sourcesLoading}
             selectedDocumentCount={
               selectedDocumentIds.length
             }
@@ -1111,6 +1248,9 @@ function App() {
             error={chatError}
             onSendMessage={
               handleSendMessage
+            }
+            onAssistantMessageSelect={
+              handleAssistantMessageSelect
             }
             onUploadClick={() =>
               setUploadModalOpen(true)
@@ -1126,6 +1266,19 @@ function App() {
           </aside>
         )}
       </div>
+
+      <WorkspaceDialog
+        dialog={workspaceDialog}
+        busy={workspaceDialogBusy}
+        error={sidebarError}
+        onClose={() => {
+          if (!workspaceDialogBusy) {
+            setWorkspaceDialog(null);
+            setSidebarError(null);
+          }
+        }}
+        onConfirm={confirmWorkspaceDialog}
+      />
 
       <UploadModal
         open={uploadModalOpen}
