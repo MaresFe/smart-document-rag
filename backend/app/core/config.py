@@ -1,7 +1,10 @@
 from pathlib import Path
 
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -20,18 +23,34 @@ class Settings(BaseSettings):
     upload_dir: Path = PROJECT_ROOT / "uploads"
     max_upload_size_mb: int = 25
 
-    embedding_model_name: str = "intfloat/multilingual-e5-large"
+    ocr_enabled: bool = True
+    ocr_languages: str = "tur+eng"
+    ocr_dpi: int = 180
+    ocr_max_pages: int = 25
+    ocr_page_timeout_seconds: int = 20
+    ocr_min_text_characters: int = 10
+    ocr_max_pixels_per_page: int = 20_000_000
+
+    embedding_model_name: str = (
+        "intfloat/multilingual-e5-large"
+    )
     embedding_dimension: int = 1024
+
+    retrieval_min_query_characters: int = 2
+    retrieval_min_similarity_score: float = 0.75
 
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2:3b"
+    ollama_model: str = "qwen3.5:9b"
+    ollama_keep_alive: str = "30m"
     llm_timeout_seconds: int = 120
 
     auth_secret_key: SecretStr
     auth_algorithm: str = "HS256"
     auth_access_token_minutes: int = 60
-    auth_cookie_name: str = "smart_rag_access_token"
+    auth_cookie_name: str = (
+        "smart_rag_access_token"
+    )
     auth_cookie_secure: bool = False
 
     allowed_file_extensions: set[str] = {

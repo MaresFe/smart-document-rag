@@ -1,3 +1,5 @@
+import logging
+from time import perf_counter
 from uuid import UUID
 
 from fastapi import (
@@ -32,12 +34,18 @@ from app.schemas.chat import (
     ChatSourceRead,
 )
 from app.services.embedding import EmbeddingError
+from app.services.answer_validation import (
+    FIXED_NOT_FOUND_ANSWER,
+)
 from app.services.llm import LLMError, generate_answer
 from app.services.retrieval import (
     RetrievedChunk,
     retrieve_relevant_chunks,
 )
 
+performance_logger = logging.getLogger(
+    "uvicorn.error",
+)
 
 router = APIRouter(
     prefix="/chat",
@@ -71,11 +79,7 @@ def build_retrieval_based_answer(
     retrieved_chunks: list[RetrievedChunk],
 ) -> str:
     if not retrieved_chunks:
-        return (
-            "Bu soruyla ilgili seçili belgelerde yeterli bilgi "
-            "bulunamadı. Daha farklı bir soru sormayı veya ilgili "
-            "bir belge seçmeyi deneyebilirsin."
-        )
+        return FIXED_NOT_FOUND_ANSWER
 
     source_sections: list[str] = []
 
@@ -431,6 +435,9 @@ def create_chat_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ChatResponse:
+    total_started = perf_counter()
+    preparation_started = total_started
+
     chat_session = get_owned_chat_session(
         db=db,
         session_id=session_id,
@@ -441,8 +448,12 @@ def create_chat_message(
 
     if not normalized_content:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Message content cannot be empty.",
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail=(
+                "Message content cannot be empty."
+            ),
         )
 
     user_message = ChatMessage(
@@ -475,15 +486,38 @@ def create_chat_message(
         ).all(),
     )
 
+    preparation_ms = (
+        perf_counter() - preparation_started
+    ) * 1000
+
+    retrieval_started = perf_counter()
+
     try:
-        retrieved_chunks = retrieve_relevant_chunks(
-            db=db,
-            query=normalized_content,
-            user_id=current_user.id,
-            limit=5,
-            document_ids=linked_document_ids,
+        retrieved_chunks = (
+            retrieve_relevant_chunks(
+                db=db,
+                query=normalized_content,
+                user_id=current_user.id,
+                limit=5,
+                document_ids=linked_document_ids,
+            )
         )
     except EmbeddingError as error:
+        retrieval_ms = (
+            perf_counter() - retrieval_started
+        ) * 1000
+
+        performance_logger.warning(
+            "RAG request failed | "
+            "session_id=%s | "
+            "stage=retrieval | "
+            "elapsed_ms=%.2f | "
+            "error_type=%s",
+            session_id,
+            retrieval_ms,
+            type(error).__name__,
+        )
+
         db.rollback()
 
         raise HTTPException(
@@ -491,22 +525,53 @@ def create_chat_message(
             detail=str(error),
         ) from error
 
+    retrieval_ms = (
+        perf_counter() - retrieval_started
+    ) * 1000
+
+    llm_started = perf_counter()
+    used_fallback = False
+
     if retrieved_chunks:
         try:
             assistant_content = generate_answer(
                 question=normalized_content,
                 retrieved_chunks=retrieved_chunks,
             )
-        except LLMError:
-            assistant_content = build_retrieval_based_answer(
-                question=normalized_content,
-                retrieved_chunks=retrieved_chunks,
+        except LLMError as error:
+            used_fallback = True
+
+            performance_logger.warning(
+                "RAG LLM fallback | "
+                "session_id=%s | "
+                "error_type=%s",
+                session_id,
+                type(error).__name__,
+            )
+
+            assistant_content = (
+                build_retrieval_based_answer(
+                    question=normalized_content,
+                    retrieved_chunks=(
+                        retrieved_chunks
+                    ),
+                )
             )
     else:
-        assistant_content = build_retrieval_based_answer(
-            question=normalized_content,
-            retrieved_chunks=[],
+        used_fallback = True
+
+        assistant_content = (
+            build_retrieval_based_answer(
+                question=normalized_content,
+                retrieved_chunks=[],
+            )
         )
+
+    llm_ms = (
+        perf_counter() - llm_started
+    ) * 1000
+
+    persistence_started = perf_counter()
 
     assistant_message = ChatMessage(
         session_id=chat_session.id,
@@ -517,13 +582,26 @@ def create_chat_message(
     db.add(assistant_message)
     db.flush()
 
+    answer_uses_sources = (
+        assistant_content.strip().casefold()
+        != FIXED_NOT_FOUND_ANSWER.casefold()
+    )
+
+    source_chunks = (
+        retrieved_chunks
+        if answer_uses_sources
+        else []
+    )
+
     message_sources = [
         MessageSource(
             message_id=assistant_message.id,
             chunk_id=result.chunk_id,
-            similarity_score=result.similarity_score,
+            similarity_score=(
+                result.similarity_score
+            ),
         )
-        for result in retrieved_chunks
+        for result in source_chunks
     ]
 
     db.add_all(message_sources)
@@ -532,17 +610,51 @@ def create_chat_message(
     db.refresh(user_message)
     db.refresh(assistant_message)
 
+    persistence_ms = (
+        perf_counter() - persistence_started
+    ) * 1000
+
     sources = [
         ChatSourceRead(
             chunk_id=result.chunk_id,
             document_id=result.document_id,
             chunk_index=result.chunk_index,
             content=result.content,
-            similarity_score=result.similarity_score,
-            original_filename=result.original_filename,
+            similarity_score=(
+                result.similarity_score
+            ),
+            original_filename=(
+                result.original_filename
+            ),
         )
-        for result in retrieved_chunks
+        for result in source_chunks
     ]
+
+    total_ms = (
+        perf_counter() - total_started
+    ) * 1000
+
+    performance_logger.info(
+        "RAG request timing | "
+        "session_id=%s | "
+        "linked_documents=%d | "
+        "sources=%d | "
+        "preparation_ms=%.2f | "
+        "retrieval_ms=%.2f | "
+        "llm_ms=%.2f | "
+        "persistence_ms=%.2f | "
+        "total_ms=%.2f | "
+        "fallback=%s",
+        session_id,
+        len(linked_document_ids),
+        len(sources),
+        preparation_ms,
+        retrieval_ms,
+        llm_ms,
+        persistence_ms,
+        total_ms,
+        used_fallback,
+    )
 
     return ChatResponse(
         user_message=user_message,

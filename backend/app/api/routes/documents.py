@@ -59,6 +59,86 @@ def get_owned_document(
     return document
 
 
+def remove_document_and_file(
+    db: Session,
+    document: Document,
+) -> None:
+    storage_path = Path(
+        document.storage_path,
+    )
+
+    db.delete(document)
+    db.commit()
+
+    try:
+        storage_path.unlink(
+            missing_ok=True,
+        )
+    except OSError:
+        pass
+
+
+def get_extraction_error_detail(
+    file_type: str,
+    error: TextExtractionError,
+) -> str:
+    error_message = str(error).strip()
+
+    if file_type == "pdf":
+        detailed_pdf_error_markers = (
+            "OCR işlemi",
+            "OCR motoru",
+            "OCR görüntü",
+            "OCR ile işlenemedi",
+            "OCR gerektiren",
+            "zaman sınırını",
+            "sayfa sayısı",
+            "görüntü boyutu",
+            "okunamadı veya bozuk",
+        )
+
+        if any(
+            marker in error_message
+            for marker
+            in detailed_pdf_error_markers
+        ):
+            return error_message
+
+        return (
+            "PDF dosyasında metin katmanı "
+            "veya OCR ile okunabilir içerik "
+            "bulunamadı."
+        )
+
+    error_messages = {
+        "docx": (
+            "DOCX dosyası işlenebilir "
+            "metin veya tablo içermiyor."
+        ),
+        "xlsx": (
+            "XLSX dosyası işlenebilir "
+            "çalışma sayfası verisi içermiyor."
+        ),
+        "csv": (
+            "CSV dosyası okunamadı veya "
+            "işlenebilir satır içermiyor."
+        ),
+        "txt": (
+            "TXT dosyası işlenebilir "
+            "metin içermiyor."
+        ),
+    }
+
+    return error_messages.get(
+        file_type,
+        error_message
+        or (
+            "Belgeden işlenebilir metin "
+            "çıkarılamadı."
+        ),
+    )
+
+
 @router.post(
     "",
     response_model=DocumentRead,
@@ -67,7 +147,9 @@ def get_owned_document(
 def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user,
+    ),
 ) -> Document:
     (
         stored_filename,
@@ -79,7 +161,8 @@ def upload_document(
     document = Document(
         user_id=current_user.id,
         original_filename=(
-            file.filename or stored_filename
+            file.filename
+            or stored_filename
         ),
         stored_filename=stored_filename,
         file_type=file_type,
@@ -89,24 +172,45 @@ def upload_document(
         status="processing",
     )
 
-    db.add(document)
-    db.commit()
-    db.refresh(document)
-
     try:
-        extracted_text = extract_text_from_document(
-            file_type=document.file_type,
-            storage_path=document.storage_path,
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+
+    except Exception:
+        db.rollback()
+
+        Path(storage_path).unlink(
+            missing_ok=True,
         )
 
-        chunks = chunk_text(extracted_text)
+        raise
+
+    try:
+        extracted_text = (
+            extract_text_from_document(
+                file_type=document.file_type,
+                storage_path=(
+                    document.storage_path
+                ),
+            )
+        )
+
+        chunks = chunk_text(
+            extracted_text,
+        )
 
         if not chunks:
             raise TextExtractionError(
-                "No extractable text found in document.",
+                "Belgede çıkarılabilir "
+                "metin bulunamadı.",
             )
 
-        embeddings = create_passage_embeddings(chunks)
+        embeddings = (
+            create_passage_embeddings(
+                chunks,
+            )
+        )
 
         document_chunks = [
             DocumentChunk(
@@ -115,16 +219,22 @@ def upload_document(
                 content=chunk,
                 embedding=embeddings[index],
                 source_metadata={
-                    "file_type": document.file_type,
+                    "file_type": (
+                        document.file_type
+                    ),
                     "original_filename": (
-                        document.original_filename
+                        document
+                        .original_filename
                     ),
                 },
             )
-            for index, chunk in enumerate(chunks)
+            for index, chunk
+            in enumerate(chunks)
         ]
 
-        db.add_all(document_chunks)
+        db.add_all(
+            document_chunks,
+        )
 
         document.status = "ready"
         document.error_message = None
@@ -132,9 +242,35 @@ def upload_document(
         db.commit()
         db.refresh(document)
 
-    except (TextExtractionError, EmbeddingError) as error:
+    except TextExtractionError as error:
+        error_detail = (
+            get_extraction_error_detail(
+                file_type=(
+                    document.file_type
+                ),
+                error=error,
+            )
+        )
+
+        remove_document_and_file(
+            db=db,
+            document=document,
+        )
+
+        raise HTTPException(
+            status_code=(
+                status
+                .HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail=error_detail,
+        ) from error
+
+    except EmbeddingError:
         document.status = "failed"
-        document.error_message = str(error)
+        document.error_message = (
+            "Belge metni çıkarıldı ancak "
+            "anlamsal indeks oluşturulamadı."
+        )
 
         db.commit()
         db.refresh(document)
@@ -148,15 +284,24 @@ def upload_document(
 )
 def list_documents(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user,
+    ),
 ) -> list[Document]:
     statement = (
         select(Document)
-        .where(Document.user_id == current_user.id)
-        .order_by(Document.created_at.desc())
+        .where(
+            Document.user_id
+            == current_user.id,
+        )
+        .order_by(
+            Document.created_at.desc(),
+        )
     )
 
-    return list(db.scalars(statement).all())
+    return list(
+        db.scalars(statement).all(),
+    )
 
 
 @router.get(
@@ -166,7 +311,9 @@ def list_documents(
 def get_document(
     document_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user,
+    ),
 ) -> Document:
     return get_owned_document(
         db=db,
@@ -182,7 +329,9 @@ def get_document(
 def list_document_chunks(
     document_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user,
+    ),
 ) -> list[DocumentChunk]:
     get_owned_document(
         db=db,
@@ -192,11 +341,18 @@ def list_document_chunks(
 
     statement = (
         select(DocumentChunk)
-        .where(DocumentChunk.document_id == document_id)
-        .order_by(DocumentChunk.chunk_index)
+        .where(
+            DocumentChunk.document_id
+            == document_id,
+        )
+        .order_by(
+            DocumentChunk.chunk_index,
+        )
     )
 
-    return list(db.scalars(statement).all())
+    return list(
+        db.scalars(statement).all(),
+    )
 
 
 @router.delete(
@@ -206,7 +362,9 @@ def list_document_chunks(
 def delete_document(
     document_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user,
+    ),
 ) -> Response:
     document = get_owned_document(
         db=db,
@@ -214,15 +372,10 @@ def delete_document(
         user_id=current_user.id,
     )
 
-    storage_path = Path(document.storage_path)
-
-    db.delete(document)
-    db.commit()
-
-    try:
-        storage_path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    remove_document_and_file(
+        db=db,
+        document=document,
+    )
 
     return Response(
         status_code=status.HTTP_204_NO_CONTENT,
