@@ -16,3 +16,5 @@ venv/
 *.log
 *.sqlite3
 uploads/
+
+backend/evaluation/results/

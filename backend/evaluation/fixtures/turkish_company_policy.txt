@@ -1,0 +1,15 @@
+ARTEMİS TEKNOLOJİ A.Ş.
+BİLGİ GÜVENLİĞİ VE ÇALIŞMA POLİTİKASI
+
+Belge sahibi Bilgi Teknolojileri Direktörlüğüdür. Bu politika 15 Mayıs 2026 tarihinde yürürlüğe girmiştir.
+
+Şirketin standart çalışma saatleri hafta içi 09.00 ile 18.00 arasındadır. Çalışanlar, yöneticilerinin onayını almak şartıyla salı ve perşembe günleri uzaktan çalışabilir.
+
+Yıllık izin talepleri, izin başlangıcından en az üç iş günü önce insan kaynakları sistemine girilmelidir.
+
+Bilgi güvenliği olayı fark eden çalışan, olayı en geç 30 dakika içinde guvenlik@artemis.example adresine bildirmelidir.
+
+Şirket parolaları başka çalışanlarla veya üçüncü kişilerle paylaşılamaz. Parolalar en az 12 karakterden oluşmalıdır.
+
+Proje belgeleri, proje tamamlandıktan sonra beş yıl boyunca saklanır. Saklama süresi sona eren belgeler Bilgi Teknolojileri Direktörlüğünün onayıyla güvenli biçimde silinir.
+
