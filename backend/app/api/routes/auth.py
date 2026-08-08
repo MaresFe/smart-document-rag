@@ -27,7 +27,9 @@ from app.models.user import User
 from app.schemas.user import (
     InvitationAccept,
     InvitationCreate,
+    InvitationPreview,
     InvitationRead,
+    InvitationTokenRequest,
     UserLogin,
     UserRead,
     UserRegister,
@@ -251,6 +253,31 @@ def accept_invitation(
     set_auth_cookie(response, access_token)
 
     return user
+
+
+@router.post(
+    "/invitations/preview",
+    response_model=InvitationPreview,
+)
+def preview_invitation(
+    payload: InvitationTokenRequest,
+    db: Session = Depends(get_db),
+) -> InvitationPreview:
+    invitation = find_valid_invitation(
+        db=db,
+        raw_token=payload.token,
+    )
+
+    if invitation is None or invitation.email is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation is invalid or expired.",
+        )
+
+    return InvitationPreview(
+        email=normalize_email(invitation.email),
+        expires_at=invitation.expires_at,
+    )
 
 
 @router.post(

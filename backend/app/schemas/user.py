@@ -50,6 +50,18 @@ class InvitationCreate(BaseModel):
     email: EmailStr
 
 
+class InvitationTokenRequest(BaseModel):
+    token: str = Field(
+        min_length=32,
+        max_length=512,
+    )
+
+
+class InvitationPreview(BaseModel):
+    email: EmailStr
+    expires_at: datetime
+
+
 class InvitationAccept(FullNameMixin):
     token: str = Field(
         min_length=32,

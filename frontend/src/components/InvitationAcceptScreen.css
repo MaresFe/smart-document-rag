@@ -1,0 +1,90 @@
+.invitation-password-note {
+  margin: -5px 0 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.invitation-email-input {
+  cursor: default;
+  color: var(--text-secondary);
+  background: var(--surface-secondary) !important;
+}
+
+.invitation-loading {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-secondary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.invitation-login-link {
+  width: fit-content;
+  margin: 3px auto 0;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.invitation-login-link:hover {
+  text-decoration: underline;
+}
+
+.invitation-invalid,
+.invitation-success {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-secondary);
+}
+
+.invitation-invalid p,
+.invitation-success span {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.invitation-invalid a {
+  width: fit-content;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.invitation-invalid a:hover {
+  text-decoration: underline;
+}
+
+.invitation-success {
+  border-color: color-mix(
+    in srgb,
+    #16a34a 36%,
+    var(--border)
+  );
+  background: color-mix(
+    in srgb,
+    #16a34a 8%,
+    var(--surface)
+  );
+}
+
+.invitation-success strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+@media (max-width: 520px) {
+  .invitation-card .auth-brand-panel {
+    min-height: 112px;
+  }
+}

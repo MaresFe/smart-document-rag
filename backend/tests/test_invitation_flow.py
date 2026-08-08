@@ -151,6 +151,13 @@ def test_admin_invitation_is_hashed_single_use_and_creates_user(
         raw_token
     )
 
+    preview_response = invitee_client.post(
+        "/api/auth/invitations/preview",
+        json={"token": raw_token},
+    )
+    assert preview_response.status_code == 200
+    assert preview_response.json()["email"] == invitee_email
+
     accept_response = invitee_client.post(
         "/api/auth/invitations/accept",
         json={
@@ -179,6 +186,10 @@ def test_admin_invitation_is_hashed_single_use_and_creates_user(
         },
     )
     assert second_use_response.status_code == 400
+    assert api_client_factory().post(
+        "/api/auth/invitations/preview",
+        json={"token": raw_token},
+    ).status_code == 400
 
     invitee_client.post("/api/auth/logout")
     login_response = invitee_client.post(
