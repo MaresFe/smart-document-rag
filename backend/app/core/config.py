@@ -59,6 +59,9 @@ class Settings(BaseSettings):
         "txt",
         "csv",
         "xlsx",
+        "png",
+        "jpg",
+        "jpeg",
     }
 
     model_config = SettingsConfigDict(
