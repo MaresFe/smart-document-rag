@@ -400,8 +400,9 @@ function UploadModal({
           </h3>
 
           <p>
-            PDF, DOCX, TXT, CSV ve XLSX
-            dosyaları yükleyebilirsin.
+            PDF, DOCX, TXT, CSV, XLSX,
+            PNG ve JPG dosyaları
+            yükleyebilirsin.
             Metin çıkarma, bölümleme ve
             anlamsal indeksleme işlemleri
             otomatik uygulanır.
@@ -414,7 +415,8 @@ function UploadModal({
             hidden
             disabled={uploading}
             accept={
-              ".pdf,.docx,.txt,.csv,.xlsx"
+              ".pdf,.docx,.txt,.csv,.xlsx,"
+              + ".png,.jpg,.jpeg"
             }
             onChange={(event) => {
               addFiles(

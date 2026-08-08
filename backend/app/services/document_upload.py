@@ -4,6 +4,7 @@ from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
 from fastapi import HTTPException, UploadFile, status
+from PIL import Image, UnidentifiedImageError
 
 from app.core.config import settings
 
@@ -21,6 +22,12 @@ OFFICE_REQUIRED_ENTRIES = {
         "[Content_Types].xml",
         "xl/workbook.xml",
     },
+}
+
+IMAGE_FILE_FORMATS = {
+    "png": "PNG",
+    "jpg": "JPEG",
+    "jpeg": "JPEG",
 }
 
 
@@ -71,7 +78,8 @@ def validate_file_extension(filename: str) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Desteklenmeyen dosya türü: {extension}. "
-                "Desteklenen türler: PDF, DOCX, TXT, CSV ve XLSX."
+                "Desteklenen türler: PDF, DOCX, TXT, CSV, "
+                "XLSX, PNG, JPG ve JPEG."
             ),
         )
 
@@ -291,6 +299,81 @@ def validate_text_content(
         reset_file_position(file)
 
 
+def validate_image_content(
+    file: UploadFile,
+    file_type: str,
+) -> None:
+    expected_format = IMAGE_FILE_FORMATS[
+        file_type
+    ]
+
+    try:
+        reset_file_position(file)
+
+        with Image.open(file.file) as image:
+            if image.format != expected_format:
+                raise HTTPException(
+                    status_code=(
+                        status.HTTP_400_BAD_REQUEST
+                    ),
+                    detail=(
+                        "Dosyanın içeriği geçerli bir "
+                        f"{file_type.upper()} görseliyle "
+                        "eşleşmiyor."
+                    ),
+                )
+
+            width, height = image.size
+
+            if width <= 0 or height <= 0:
+                raise HTTPException(
+                    status_code=(
+                        status.HTTP_400_BAD_REQUEST
+                    ),
+                    detail=(
+                        "Görselin boyutları geçersiz."
+                    ),
+                )
+
+            pixel_count = width * height
+
+            if (
+                pixel_count
+                > settings.ocr_max_pixels_per_page
+            ):
+                raise HTTPException(
+                    status_code=(
+                        status.HTTP_400_BAD_REQUEST
+                    ),
+                    detail=(
+                        "Görsel OCR piksel sınırını "
+                        "aşıyor."
+                    ),
+                )
+
+            image.verify()
+
+    except HTTPException:
+        raise
+
+    except (
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        Image.DecompressionBombError,
+    ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Görsel dosyası okunamadı, bozuk "
+                "veya güvenli işleme sınırlarını aşıyor."
+            ),
+        ) from error
+
+    finally:
+        reset_file_position(file)
+
+
 def validate_file_content(
     file: UploadFile,
     file_type: str,
@@ -308,6 +391,13 @@ def validate_file_content(
 
     if file_type in {"txt", "csv"}:
         validate_text_content(
+            file=file,
+            file_type=file_type,
+        )
+        return
+
+    if file_type in IMAGE_FILE_FORMATS:
+        validate_image_content(
             file=file,
             file_type=file_type,
         )

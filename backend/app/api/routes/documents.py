@@ -110,6 +110,15 @@ def get_extraction_error_detail(
             "bulunamadı."
         )
 
+    if file_type in {"png", "jpg", "jpeg"}:
+        return (
+            error_message
+            or (
+                "Görselde OCR ile okunabilir "
+                "metin bulunamadı."
+            )
+        )
+
     error_messages = {
         "docx": (
             "DOCX dosyası işlenebilir "

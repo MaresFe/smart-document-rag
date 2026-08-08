@@ -116,40 +116,30 @@ def extract_text_from_txt(path: Path) -> str:
     )
 
 
-def extract_text_from_pdf_page_with_ocr(
-    page: fitz.Page,
-    page_number: int,
+def extract_text_from_pillow_image_with_ocr(
+    image: Image.Image,
+    source_label: str,
 ) -> str:
-    try:
-        pixmap = page.get_pixmap(
-            dpi=settings.ocr_dpi,
-            colorspace=fitz.csRGB,
-            alpha=False,
-        )
-    except Exception as error:
-        raise TextExtractionError(
-            f"PDF dosyasının {page_number}. sayfası "
-            "OCR için görüntüye dönüştürülemedi.",
-        ) from error
+    width, height = image.size
+    pixel_count = width * height
 
-    pixel_count = pixmap.width * pixmap.height
-
-    if pixel_count > settings.ocr_max_pixels_per_page:
+    if (
+        width <= 0
+        or height <= 0
+        or pixel_count
+        > settings.ocr_max_pixels_per_page
+    ):
         raise TextExtractionError(
-            f"PDF dosyasının {page_number}. sayfası "
-            "OCR görüntü boyutu sınırını aşıyor.",
+            f"{source_label} OCR görüntü boyutu "
+            "sınırını aşıyor.",
         )
 
     try:
-        with Image.frombytes(
-            "RGB",
-            (pixmap.width, pixmap.height),
-            pixmap.samples,
-        ) as page_image:
-            grayscale_image = ImageOps.grayscale(
-                page_image,
-            )
+        grayscale_image = ImageOps.grayscale(
+            image,
+        )
 
+        try:
             enhanced_image = ImageOps.autocontrast(
                 grayscale_image,
             )
@@ -167,13 +157,14 @@ def extract_text_from_pdf_page_with_ocr(
                     )
                 )
             finally:
-                grayscale_image.close()
                 enhanced_image.close()
+        finally:
+            grayscale_image.close()
 
     except RuntimeError as error:
         raise TextExtractionError(
-            f"PDF dosyasının {page_number}. sayfasında "
-            "OCR işlemi zaman sınırını aştı.",
+            f"{source_label} OCR işlemi zaman "
+            "sınırını aştı.",
         ) from error
 
     except pytesseract.TesseractNotFoundError as error:
@@ -183,17 +174,61 @@ def extract_text_from_pdf_page_with_ocr(
 
     except pytesseract.TesseractError as error:
         raise TextExtractionError(
-            f"PDF dosyasının {page_number}. sayfasında "
-            "OCR işlemi tamamlanamadı.",
+            f"{source_label} OCR işlemi "
+            "tamamlanamadı.",
         ) from error
+
+    except TextExtractionError:
+        raise
 
     except Exception as error:
         raise TextExtractionError(
-            f"PDF dosyasının {page_number}. sayfası "
-            "OCR ile işlenemedi.",
+            f"{source_label} OCR ile işlenemedi.",
         ) from error
 
     return extracted_text.strip()
+
+
+def extract_text_from_pdf_page_with_ocr(
+    page: fitz.Page,
+    page_number: int,
+) -> str:
+    source_label = (
+        f"PDF dosyasının {page_number}. sayfası"
+    )
+
+    try:
+        pixmap = page.get_pixmap(
+            dpi=settings.ocr_dpi,
+            colorspace=fitz.csRGB,
+            alpha=False,
+        )
+    except Exception as error:
+        raise TextExtractionError(
+            f"{source_label} OCR için görüntüye "
+            "dönüştürülemedi.",
+        ) from error
+
+    try:
+        with Image.frombytes(
+            "RGB",
+            (pixmap.width, pixmap.height),
+            pixmap.samples,
+        ) as page_image:
+            return (
+                extract_text_from_pillow_image_with_ocr(
+                    image=page_image,
+                    source_label=source_label,
+                )
+            )
+
+    except TextExtractionError:
+        raise
+
+    except Exception as error:
+        raise TextExtractionError(
+            f"{source_label} OCR ile işlenemedi.",
+        ) from error
 
 
 def extract_text_from_pdf(path: Path) -> str:
@@ -290,6 +325,75 @@ def extract_text_from_pdf(path: Path) -> str:
         )
 
     return "\n\n".join(text_parts)
+
+
+def extract_text_from_image(path: Path) -> str:
+    if not settings.ocr_enabled:
+        raise TextExtractionError(
+            "Görselleri okuyabilmek için OCR "
+            "desteği etkin olmalıdır.",
+        )
+
+    started_at = perf_counter()
+
+    try:
+        with Image.open(path) as source_image:
+            oriented_image = (
+                ImageOps.exif_transpose(
+                    source_image,
+                )
+            )
+
+            try:
+                oriented_image.load()
+                image_width, image_height = (
+                    oriented_image.size
+                )
+
+                extracted_text = (
+                    extract_text_from_pillow_image_with_ocr(
+                        image=oriented_image,
+                        source_label="Görsel",
+                    )
+                )
+            finally:
+                if oriented_image is not source_image:
+                    oriented_image.close()
+
+    except TextExtractionError:
+        raise
+
+    except Exception as error:
+        raise TextExtractionError(
+            "Görsel dosyası okunamadı veya bozuk.",
+        ) from error
+
+    if not has_meaningful_text(extracted_text):
+        raise TextExtractionError(
+            "Görselde OCR ile okunabilir metin "
+            "bulunamadı.",
+        )
+
+    elapsed_ms = (
+        perf_counter() - started_at
+    ) * 1000
+
+    performance_logger.info(
+        "Image OCR timing | "
+        "file=%s | "
+        "width=%s | "
+        "height=%s | "
+        "elapsed_ms=%.2f",
+        path.name,
+        image_width,
+        image_height,
+        elapsed_ms,
+    )
+
+    return (
+        "[Görsel - OCR]\n"
+        f"{extracted_text}"
+    )
 
 
 def iter_docx_blocks(
@@ -525,6 +629,11 @@ def extract_text_from_document(
         case "xlsx":
             extracted_text = (
                 extract_text_from_xlsx(path)
+            )
+
+        case "png" | "jpg" | "jpeg":
+            extracted_text = (
+                extract_text_from_image(path)
             )
 
         case _:

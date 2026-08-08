@@ -13,7 +13,10 @@ class Document(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "file_type IN ('pdf', 'docx', 'txt', 'csv', 'xlsx')",
+            (
+                "file_type IN ('pdf', 'docx', 'txt', "
+                "'csv', 'xlsx', 'png', 'jpg', 'jpeg')"
+            ),
             name="check_documents_file_type",
         ),
         CheckConstraint(
