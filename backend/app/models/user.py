@@ -1,7 +1,14 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, func, true
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    String,
+    false,
+    func,
+    true,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,7 +37,7 @@ class User(Base):
     )
 
     # Nullable olması geçici olarak gereklidir.
-    # Mevcut development kullanıcısının şifresi bulunmuyor.
+    # Eski development kullanıcısının şifresi bulunmuyor.
     password_hash: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
@@ -41,6 +48,18 @@ class User(Base):
         default=True,
         server_default=true(),
         nullable=False,
+    )
+
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+        nullable=False,
+    )
+
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -66,4 +85,18 @@ class User(Base):
         "ChatSession",
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+
+    action_tokens = relationship(
+        "AccountToken",
+        foreign_keys="AccountToken.user_id",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    issued_tokens = relationship(
+        "AccountToken",
+        foreign_keys="AccountToken.created_by_user_id",
+        back_populates="created_by_user",
+        passive_deletes=True,
     )
