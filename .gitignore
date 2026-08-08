@@ -17,4 +17,9 @@ venv/
 *.sqlite3
 uploads/
 
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
 backend/evaluation/results/
