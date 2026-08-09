@@ -7,11 +7,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import (
     CORSMiddleware,
 )
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.middleware.trustedhost import (
+    TrustedHostMiddleware,
+)
 
 from app.api.router import api_router
+from app.core.config import settings
 from app.db.session import (
     check_database_connection,
+)
+from app.middleware.security import (
+    ApplicationSecurityMiddleware,
 )
 from app.services.embedding import (
     EmbeddingError,
@@ -105,21 +113,46 @@ app = FastAPI(
 )
 
 app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.trusted_hosts,
+)
+
+app.add_middleware(
+    ApplicationSecurityMiddleware,
+    allowed_origins=settings.cors_allowed_origins,
+    auth_cookie_name=settings.auth_cookie_name,
+    hsts_enabled=settings.security_hsts_enabled,
+    hsts_max_age_seconds=(
+        settings.security_hsts_max_age_seconds
+    ),
+    hsts_include_subdomains=(
+        settings.security_hsts_include_subdomains
+    ),
+)
+
+app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=[
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+    ],
+    allow_headers=[
+        "Accept",
+        "Content-Type",
+    ],
 )
 
 app.include_router(api_router)
 
 
 @app.get("/")
-def read_root():
+def read_root() -> dict[str, str]:
     return {
         "message": (
             "Smart Document RAG API is running."
@@ -128,23 +161,34 @@ def read_root():
 
 
 @app.get("/health")
-def health_check():
+def health_check() -> dict[str, str]:
     return {
         "status": "ok",
     }
 
 
 @app.get("/health/db")
-def database_health_check():
+def database_health_check() -> JSONResponse:
     try:
         check_database_connection()
 
-        return {
-            "database": "connected",
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "database": "connected",
+            },
+        )
 
     except SQLAlchemyError as error:
-        return {
-            "database": "error",
-            "detail": str(error),
-        }
+        startup_logger.warning(
+            "Database health check failed | "
+            "error_type=%s",
+            type(error).__name__,
+        )
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "database": "error",
+            },
+        )

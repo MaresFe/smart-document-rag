@@ -7,6 +7,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Request,
     Response,
     status,
 )
@@ -53,6 +54,11 @@ from app.services.email_delivery import (
     send_invitation_email,
     send_password_reset_email,
 )
+from app.services.rate_limiting import (
+    RateLimitPolicy,
+    clear_auth_rate_limit,
+    enforce_auth_rate_limit,
+)
 
 
 router = APIRouter(
@@ -66,9 +72,42 @@ PASSWORD_RESET_RESPONSE_MESSAGE = (
     "Hesap uygunsa parola yenileme bağlantısı gönderildi."
 )
 
+DUMMY_PASSWORD_HASH = hash_password(
+    "dummy-password-used-only-for-timing-equality",
+)
+
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def login_rate_limit_policy() -> RateLimitPolicy:
+    return RateLimitPolicy(
+        max_attempts=settings.auth_login_max_attempts,
+        window_seconds=(
+            settings.auth_login_window_seconds
+        ),
+    )
+
+
+def password_reset_rate_limit_policy() -> RateLimitPolicy:
+    return RateLimitPolicy(
+        max_attempts=(
+            settings.auth_password_reset_max_attempts
+        ),
+        window_seconds=(
+            settings.auth_password_reset_window_seconds
+        ),
+    )
+
+
+def token_rate_limit_policy() -> RateLimitPolicy:
+    return RateLimitPolicy(
+        max_attempts=settings.auth_token_max_attempts,
+        window_seconds=(
+            settings.auth_token_window_seconds
+        ),
+    )
 
 
 def set_auth_cookie(
@@ -238,9 +277,17 @@ def create_invitation(
 )
 def accept_invitation(
     payload: InvitationAccept,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ) -> User:
+    enforce_auth_rate_limit(
+        scope="invitation-accept",
+        request=request,
+        identity=payload.token,
+        policy=token_rate_limit_policy(),
+    )
+
     invitation = find_valid_invitation(
         db=db,
         raw_token=payload.token,
@@ -300,8 +347,16 @@ def accept_invitation(
 )
 def preview_invitation(
     payload: InvitationTokenRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> InvitationPreview:
+    enforce_auth_rate_limit(
+        scope="invitation-preview",
+        request=request,
+        identity=payload.token,
+        policy=token_rate_limit_policy(),
+    )
+
     invitation = find_valid_invitation(
         db=db,
         raw_token=payload.token,
@@ -326,12 +381,22 @@ def preview_invitation(
 )
 def request_password_reset(
     payload: PasswordResetRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> PasswordResetRequestRead:
+    normalized_email = normalize_email(str(payload.email))
+
+    enforce_auth_rate_limit(
+        scope="password-reset-request",
+        request=request,
+        identity=normalized_email,
+        policy=password_reset_rate_limit_policy(),
+    )
+
     user = find_user_by_email(
         db=db,
-        email=str(payload.email),
+        email=normalized_email,
     )
 
     if (
@@ -367,8 +432,16 @@ def request_password_reset(
 )
 def preview_password_reset(
     payload: PasswordResetTokenRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> PasswordResetPreview:
+    enforce_auth_rate_limit(
+        scope="password-reset-preview",
+        request=request,
+        identity=payload.token,
+        policy=token_rate_limit_policy(),
+    )
+
     password_reset = find_valid_password_reset(
         db=db,
         raw_token=payload.token,
@@ -399,8 +472,16 @@ def preview_password_reset(
 )
 def confirm_password_reset(
     payload: PasswordResetConfirm,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> Response:
+    enforce_auth_rate_limit(
+        scope="password-reset-confirm",
+        request=request,
+        identity=payload.token,
+        policy=token_rate_limit_policy(),
+    )
+
     password_reset = find_valid_password_reset(
         db=db,
         raw_token=payload.token,
@@ -449,21 +530,37 @@ def confirm_password_reset(
 )
 def login(
     payload: UserLogin,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ) -> User:
+    normalized_email = normalize_email(str(payload.email))
+    rate_limit_key = enforce_auth_rate_limit(
+        scope="login",
+        request=request,
+        identity=normalized_email,
+        policy=login_rate_limit_policy(),
+    )
+
     user = find_user_by_email(
         db,
-        str(payload.email),
+        normalized_email,
+    )
+
+    password_hash = (
+        user.password_hash
+        if user is not None and user.password_hash is not None
+        else DUMMY_PASSWORD_HASH
+    )
+    password_is_valid = verify_password(
+        payload.password,
+        password_hash,
     )
 
     credentials_are_valid = (
         user is not None
         and user.password_hash is not None
-        and verify_password(
-            payload.password,
-            user.password_hash,
-        )
+        and password_is_valid
     )
 
     if not credentials_are_valid:
@@ -483,6 +580,8 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email address is not verified.",
         )
+
+    clear_auth_rate_limit(rate_limit_key)
 
     access_token = create_access_token(user.id)
     set_auth_cookie(response, access_token)
