@@ -13,6 +13,11 @@ EMAIL_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 
+GENERATED_EMAIL_PATTERN = re.compile(
+    r"(?<![\w.%+-])[\w.%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+    flags=re.IGNORECASE,
+)
+
 WORD_PATTERN = re.compile(
     r"[^\W_]+",
     flags=re.UNICODE,
@@ -391,7 +396,9 @@ def preserve_exact_email_literals(
         retrieved_chunks,
     )
 
-    answer_emails = EMAIL_PATTERN.findall(
+    # Model çıktısında yerel bölüm yanlışlıkla Türkçe
+    # karakter içerse bile e-posta benzeri değeri yakala.
+    answer_emails = GENERATED_EMAIL_PATTERN.findall(
         answer,
     )
 
