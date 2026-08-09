@@ -42,18 +42,39 @@ def build_invitation_message(
     return message
 
 
-def send_invitation_email(
+def build_password_reset_message(
     recipient: str,
-    invitation_url: str,
-) -> None:
-    if settings.email_delivery_mode == "console":
-        email_logger.info(
-            "Development invitation | recipient=%s | url=%s",
-            recipient,
-            invitation_url,
+    password_reset_url: str,
+) -> EmailMessage:
+    message = EmailMessage()
+    message["Subject"] = "Smart Document RAG parola yenileme"
+    message["From"] = settings.smtp_from_email
+    message["To"] = recipient
+    message.set_content(
+        "\n".join(
+            [
+                "Smart Document RAG hesabınız için parola yenileme isteği alındı.",
+                "",
+                "Yeni bir parola belirlemek için aşağıdaki bağlantıyı açın:",
+                password_reset_url,
+                "",
+                (
+                    "Bu bağlantı "
+                    f"{settings.account_password_reset_minutes} dakika "
+                    "geçerlidir ve yalnızca bir kez kullanılabilir."
+                ),
+                "",
+                (
+                    "Bu isteği siz yapmadıysanız bağlantıyı "
+                    "kullanmayın; mevcut parolanız değişmez."
+                ),
+            ]
         )
-        return
+    )
+    return message
 
+
+def deliver_message(message: EmailMessage) -> None:
     if not settings.smtp_host:
         raise EmailDeliveryError(
             "SMTP_HOST must be configured for SMTP delivery.",
@@ -69,11 +90,6 @@ def send_invitation_email(
         raise EmailDeliveryError(
             "SMTP username and password must be configured together.",
         )
-
-    message = build_invitation_message(
-        recipient=recipient,
-        invitation_url=invitation_url,
-    )
 
     try:
         with smtplib.SMTP(
@@ -99,5 +115,45 @@ def send_invitation_email(
 
     except (OSError, smtplib.SMTPException) as error:
         raise EmailDeliveryError(
-            "Invitation email could not be delivered.",
+            "Email could not be delivered.",
         ) from error
+
+
+def send_invitation_email(
+    recipient: str,
+    invitation_url: str,
+) -> None:
+    if settings.email_delivery_mode == "console":
+        email_logger.info(
+            "Development invitation | recipient=%s | url=%s",
+            recipient,
+            invitation_url,
+        )
+        return
+
+    deliver_message(
+        build_invitation_message(
+            recipient=recipient,
+            invitation_url=invitation_url,
+        )
+    )
+
+
+def send_password_reset_email(
+    recipient: str,
+    password_reset_url: str,
+) -> None:
+    if settings.email_delivery_mode == "console":
+        email_logger.info(
+            "Development password reset | recipient=%s | url=%s",
+            recipient,
+            password_reset_url,
+        )
+        return
+
+    deliver_message(
+        build_password_reset_message(
+            recipient=recipient,
+            password_reset_url=password_reset_url,
+        )
+    )

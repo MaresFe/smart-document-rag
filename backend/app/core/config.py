@@ -59,6 +59,7 @@ class Settings(BaseSettings):
         "invite_only",
     ] = "invite_only"
     account_invitation_hours: int = 24
+    account_password_reset_minutes: int = 30
 
     frontend_base_url: str = "http://localhost:5173"
     email_delivery_mode: Literal[

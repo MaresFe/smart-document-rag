@@ -82,6 +82,32 @@ class InvitationRead(BaseModel):
     invitation_url: str | None = None
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetTokenRequest(BaseModel):
+    token: str = Field(
+        min_length=32,
+        max_length=512,
+    )
+
+
+class PasswordResetPreview(BaseModel):
+    expires_at: datetime
+
+
+class PasswordResetConfirm(PasswordResetTokenRequest):
+    password: str = Field(
+        min_length=10,
+        max_length=128,
+    )
+
+
+class PasswordResetRequestRead(BaseModel):
+    message: str
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

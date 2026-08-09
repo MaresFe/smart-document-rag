@@ -4,7 +4,9 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 
 import App from "./App.tsx";
+import ForgotPasswordScreen from "./components/ForgotPasswordScreen";
 import InvitationAcceptScreen from "./components/InvitationAcceptScreen";
+import PasswordResetScreen from "./components/PasswordResetScreen";
 
 
 type Theme = "light" | "dark";
@@ -40,18 +42,28 @@ const normalizedPath =
   window.location.pathname.replace(/\/+$/, "") || "/";
 const invitationRoute =
   normalizedPath === "/accept-invitation";
+const forgotPasswordRoute =
+  normalizedPath === "/forgot-password";
+const passwordResetRoute =
+  normalizedPath === "/reset-password";
 const invitationToken = invitationRoute
+  ? new URLSearchParams(window.location.search).get("token")
+  : null;
+const passwordResetToken = passwordResetRoute
   ? new URLSearchParams(window.location.search).get("token")
   : null;
 const initialTheme = getInitialTheme();
 
 document.documentElement.dataset.theme = initialTheme;
 
-if (invitationRoute && window.location.search) {
+if (
+  (invitationRoute || passwordResetRoute)
+  && window.location.search
+) {
   window.history.replaceState(
     null,
     "",
-    "/accept-invitation",
+    normalizedPath,
   );
 }
 
@@ -60,6 +72,15 @@ createRoot(rootElement).render(
     {invitationRoute ? (
       <InvitationAcceptScreen
         token={invitationToken}
+        initialDark={initialTheme === "dark"}
+      />
+    ) : forgotPasswordRoute ? (
+      <ForgotPasswordScreen
+        initialDark={initialTheme === "dark"}
+      />
+    ) : passwordResetRoute ? (
+      <PasswordResetScreen
+        token={passwordResetToken}
         initialDark={initialTheme === "dark"}
       />
     ) : (

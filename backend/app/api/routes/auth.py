@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+import logging
 from urllib.parse import urlencode
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     HTTPException,
     Response,
@@ -30,23 +32,38 @@ from app.schemas.user import (
     InvitationPreview,
     InvitationRead,
     InvitationTokenRequest,
+    PasswordResetConfirm,
+    PasswordResetPreview,
+    PasswordResetRequest,
+    PasswordResetRequestRead,
+    PasswordResetTokenRequest,
     UserLogin,
     UserRead,
     UserRegister,
 )
 from app.services.account_tokens import (
+    consume_password_reset_tokens,
+    create_password_reset_token,
     create_invitation_token,
     find_valid_invitation,
+    find_valid_password_reset,
 )
 from app.services.email_delivery import (
     EmailDeliveryError,
     send_invitation_email,
+    send_password_reset_email,
 )
 
 
 router = APIRouter(
     prefix="/auth",
     tags=["Authentication"],
+)
+
+auth_logger = logging.getLogger("uvicorn.error")
+
+PASSWORD_RESET_RESPONSE_MESSAGE = (
+    "Hesap uygunsa parola yenileme bağlantısı gönderildi."
 )
 
 
@@ -84,6 +101,28 @@ def build_invitation_url(raw_token: str) -> str:
     query = urlencode({"token": raw_token})
     base_url = settings.frontend_base_url.rstrip("/")
     return f"{base_url}/accept-invitation?{query}"
+
+
+def build_password_reset_url(raw_token: str) -> str:
+    query = urlencode({"token": raw_token})
+    base_url = settings.frontend_base_url.rstrip("/")
+    return f"{base_url}/reset-password?{query}"
+
+
+def deliver_password_reset_safely(
+    recipient: str,
+    password_reset_url: str,
+) -> None:
+    try:
+        send_password_reset_email(
+            recipient=recipient,
+            password_reset_url=password_reset_url,
+        )
+    except EmailDeliveryError:
+        auth_logger.exception(
+            "Password reset email delivery failed | recipient=%s",
+            recipient,
+        )
 
 
 @router.post(
@@ -278,6 +317,130 @@ def preview_invitation(
         email=normalize_email(invitation.email),
         expires_at=invitation.expires_at,
     )
+
+
+@router.post(
+    "/password-reset/request",
+    response_model=PasswordResetRequestRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def request_password_reset(
+    payload: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> PasswordResetRequestRead:
+    user = find_user_by_email(
+        db=db,
+        email=str(payload.email),
+    )
+
+    if (
+        user is not None
+        and user.is_active
+        and user.email_verified_at is not None
+        and user.password_hash is not None
+    ):
+        _, raw_token = create_password_reset_token(
+            db=db,
+            user=user,
+        )
+        db.commit()
+
+        password_reset_url = build_password_reset_url(
+            raw_token,
+        )
+
+        background_tasks.add_task(
+            deliver_password_reset_safely,
+            user.email,
+            password_reset_url,
+        )
+
+    return PasswordResetRequestRead(
+        message=PASSWORD_RESET_RESPONSE_MESSAGE,
+    )
+
+
+@router.post(
+    "/password-reset/preview",
+    response_model=PasswordResetPreview,
+)
+def preview_password_reset(
+    payload: PasswordResetTokenRequest,
+    db: Session = Depends(get_db),
+) -> PasswordResetPreview:
+    password_reset = find_valid_password_reset(
+        db=db,
+        raw_token=payload.token,
+    )
+
+    if password_reset is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset link is invalid or expired.",
+        )
+
+    user = db.get(User, password_reset.user_id)
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset link is invalid or expired.",
+        )
+
+    return PasswordResetPreview(
+        expires_at=password_reset.expires_at,
+    )
+
+
+@router.post(
+    "/password-reset/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def confirm_password_reset(
+    payload: PasswordResetConfirm,
+    db: Session = Depends(get_db),
+) -> Response:
+    password_reset = find_valid_password_reset(
+        db=db,
+        raw_token=payload.token,
+    )
+
+    if password_reset is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset link is invalid or expired.",
+        )
+
+    user = db.get(User, password_reset.user_id)
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset link is invalid or expired.",
+        )
+
+    user.password_hash = hash_password(payload.password)
+
+    consume_password_reset_tokens(
+        db=db,
+        user_id=user.id,
+    )
+
+    db.commit()
+
+    response = Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    response.delete_cookie(
+        key=settings.auth_cookie_name,
+        path="/",
+        secure=settings.auth_cookie_secure,
+        httponly=True,
+        samesite="lax",
+    )
+
+    return response
 
 
 @router.post(

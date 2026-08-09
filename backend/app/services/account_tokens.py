@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from app.models.user import User
 
 
 INVITATION_PURPOSE = "invitation"
+PASSWORD_RESET_PURPOSE = "password_reset"
 
 
 def utc_now() -> datetime:
@@ -76,3 +78,72 @@ def find_valid_invitation(
     )
 
     return db.scalar(statement)
+
+
+def create_password_reset_token(
+    db: Session,
+    user: User,
+) -> tuple[AccountToken, str]:
+    now = utc_now()
+
+    db.execute(
+        update(AccountToken)
+        .where(
+            AccountToken.purpose
+            == PASSWORD_RESET_PURPOSE,
+            AccountToken.user_id == user.id,
+            AccountToken.used_at.is_(None),
+        )
+        .values(used_at=now)
+    )
+
+    raw_token = generate_account_token()
+
+    password_reset = AccountToken(
+        user_id=user.id,
+        token_hash=hash_account_token(raw_token),
+        purpose=PASSWORD_RESET_PURPOSE,
+        expires_at=now
+        + timedelta(
+            minutes=(
+                settings.account_password_reset_minutes
+            ),
+        ),
+    )
+
+    db.add(password_reset)
+    db.flush()
+
+    return password_reset, raw_token
+
+
+def find_valid_password_reset(
+    db: Session,
+    raw_token: str,
+) -> AccountToken | None:
+    statement = select(AccountToken).where(
+        AccountToken.token_hash
+        == hash_account_token(raw_token),
+        AccountToken.purpose
+        == PASSWORD_RESET_PURPOSE,
+        AccountToken.used_at.is_(None),
+        AccountToken.expires_at > utc_now(),
+    )
+
+    return db.scalar(statement)
+
+
+def consume_password_reset_tokens(
+    db: Session,
+    user_id: UUID,
+) -> None:
+    db.execute(
+        update(AccountToken)
+        .where(
+            AccountToken.purpose
+            == PASSWORD_RESET_PURPOSE,
+            AccountToken.user_id == user_id,
+            AccountToken.used_at.is_(None),
+        )
+        .values(used_at=utc_now())
+    )
