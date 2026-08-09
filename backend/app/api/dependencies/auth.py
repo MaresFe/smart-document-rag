@@ -10,10 +10,11 @@ from app.db.session import get_db
 from app.models.user import User
 
 
-UNAUTHORIZED_EXCEPTION = HTTPException(
-    status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Authentication required.",
-)
+def authentication_required() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required.",
+    )
 
 
 def get_current_user(
@@ -24,16 +25,32 @@ def get_current_user(
     ),
 ) -> User:
     if access_token is None:
-        raise UNAUTHORIZED_EXCEPTION
+        raise authentication_required()
 
     try:
         user_id = decode_access_token(access_token)
     except InvalidAccessTokenError as error:
-        raise UNAUTHORIZED_EXCEPTION from error
+        raise authentication_required() from error
 
     user = db.get(User, user_id)
 
-    if user is None or not user.is_active:
-        raise UNAUTHORIZED_EXCEPTION
+    if (
+        user is None
+        or not user.is_active
+        or user.email_verified_at is None
+    ):
+        raise authentication_required()
 
     return user
+
+
+def get_current_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator permission is required.",
+        )
+
+    return current_user

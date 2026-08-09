@@ -41,6 +41,7 @@ elif not PROJECT_ENV_FILE.exists():
     )
 
 
+from app.core.config import settings  # noqa: E402
 from app.db.session import engine, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -77,8 +78,17 @@ def db_session() -> Generator[Session, None, None]:
 @pytest.fixture
 def api_client_factory(
     db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[ApiClientFactory, None, None]:
     clients: list[TestClient] = []
+
+    # Eski kayıt ve izolasyon testleri açık development kaydını kullanır.
+    # Üretim varsayılanı invite_only olarak kalır.
+    monkeypatch.setattr(
+        settings,
+        "registration_mode",
+        "open",
+    )
 
     def override_get_db() -> Generator[Session, None, None]:
         yield db_session

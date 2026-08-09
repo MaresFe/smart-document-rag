@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from pydantic import SecretStr
 from pydantic_settings import (
@@ -52,6 +53,25 @@ class Settings(BaseSettings):
         "smart_rag_access_token"
     )
     auth_cookie_secure: bool = False
+
+    registration_mode: Literal[
+        "open",
+        "invite_only",
+    ] = "invite_only"
+    account_invitation_hours: int = 24
+
+    frontend_base_url: str = "http://localhost:5173"
+    email_delivery_mode: Literal[
+        "console",
+        "smtp",
+    ] = "console"
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_use_tls: bool = True
+    smtp_from_email: str = "noreply@example.com"
+    smtp_timeout_seconds: int = 15
 
     allowed_file_extensions: set[str] = {
         "pdf",
