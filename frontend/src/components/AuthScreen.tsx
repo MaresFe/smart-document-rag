@@ -10,6 +10,8 @@ import type {
 
 import ThemeToggle from "./ThemeToggle";
 
+import "./PasswordResetScreen.css";
+
 
 interface AuthScreenProps {
   dark: boolean;
@@ -154,6 +156,13 @@ function AuthScreen({
                 }
               />
             </label>
+
+            <a
+              className="auth-forgot-link"
+              href="/forgot-password"
+            >
+              Parolamı unuttum
+            </a>
 
             {visibleError && (
               <div
