@@ -486,6 +486,8 @@ def extract_text_from_docx(path: Path) -> str:
 def read_csv_dataframe(
     path: Path,
 ) -> pd.DataFrame:
+    last_error: ValueError | None = None
+
     for encoding in TEXT_ENCODINGS:
         try:
             return pd.read_csv(
@@ -496,13 +498,13 @@ def read_csv_dataframe(
                 dtype=str,
                 keep_default_na=False,
             )
-        except Exception:
-            continue
+        except ValueError as error:
+            last_error = error
 
     raise TextExtractionError(
         "CSV dosyası okunamadı; dosya bozuk "
         "veya kodlaması desteklenmiyor.",
-    )
+    ) from last_error
 
 
 def extract_text_from_csv(path: Path) -> str:
