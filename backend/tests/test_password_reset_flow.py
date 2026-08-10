@@ -213,4 +213,3 @@ def test_expired_password_reset_is_rejected(
             "password": NEW_PASSWORD,
         },
     ).status_code == 400
-

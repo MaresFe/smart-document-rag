@@ -23,3 +23,5 @@ coverage.xml
 htmlcov/
 
 backend/evaluation/results/
+
+frontend/.env.production

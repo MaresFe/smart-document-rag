@@ -90,4 +90,3 @@ export function getPasswordResetErrorMessage(
 
   return "İşlem tamamlanamadı. Lütfen tekrar dene.";
 }
-

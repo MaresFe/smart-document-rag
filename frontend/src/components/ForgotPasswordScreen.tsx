@@ -188,4 +188,3 @@ function ForgotPasswordScreen({
 
 
 export default ForgotPasswordScreen;
-

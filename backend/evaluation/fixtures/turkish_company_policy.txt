@@ -12,4 +12,3 @@ Bilgi güvenliği olayı fark eden çalışan, olayı en geç 30 dakika içinde 
 Şirket parolaları başka çalışanlarla veya üçüncü kişilerle paylaşılamaz. Parolalar en az 12 karakterden oluşmalıdır.
 
 Proje belgeleri, proje tamamlandıktan sonra beş yıl boyunca saklanır. Saklama süresi sona eren belgeler Bilgi Teknolojileri Direktörlüğünün onayıyla güvenli biçimde silinir.
-

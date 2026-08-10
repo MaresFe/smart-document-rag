@@ -6,7 +6,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ ./
-RUN npm run build
+RUN VITE_BACKEND_URL= npm run build
 
 FROM nginxinc/nginx-unprivileged:1.29-alpine
 
