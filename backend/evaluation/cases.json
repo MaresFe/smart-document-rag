@@ -1,0 +1,121 @@
+{
+  "dataset": "turkish-rag-quality-v2",
+  "document": "fixtures/turkish_company_policy.txt",
+  "cases": [
+    {
+      "id": "document_owner",
+      "question": "Belgenin sahibi hangi birimdir?",
+      "expected_type": "fact",
+      "required_phrases": [
+        "Bilgi Teknolojileri Direktörlüğü"
+      ],
+      "forbidden_phrases": [],
+      "require_citation": true
+    },
+    {
+      "id": "effective_date",
+      "question": "Politika ne zaman yürürlüğe girmiştir?",
+      "expected_type": "fact",
+      "required_phrases": [
+        "15 Mayıs 2026"
+      ],
+      "forbidden_phrases": [],
+      "require_citation": true
+    },
+    {
+      "id": "remote_work_days",
+      "question": "Hangi günlerde uzaktan çalışılabilir?",
+      "expected_type": "fact",
+      "required_phrases": [
+        "salı",
+        "perşembe"
+      ],
+      "forbidden_phrases": [
+        "pazartesi",
+        "cuma",
+        "09.00",
+        "18.00"
+      ],
+      "require_citation": true
+    },
+    {
+      "id": "security_incident",
+      "question": "Bir bilgi güvenliği olayı ne kadar sürede ve nereye bildirilmelidir?",
+      "expected_type": "fact",
+      "required_phrases": [
+        "30 dakika",
+        "guvenlik@artemis.example"
+      ],
+      "forbidden_phrases": [],
+      "require_citation": true
+    },
+    {
+      "id": "password_policy",
+      "question": "Parolalarla ilgili temel kurallar nelerdir?",
+      "expected_type": "fact",
+      "required_phrases": [
+        "paylaşılamaz",
+        "12 karakter"
+      ],
+      "forbidden_phrases": [],
+      "require_citation": true
+    },
+    {
+      "id": "document_retention",
+      "question": "Proje belgeleri ne kadar süre saklanır?",
+      "expected_type": "fact",
+      "required_phrases": [
+        "beş yıl"
+      ],
+      "forbidden_phrases": [],
+      "require_citation": true
+    },
+    {
+      "id": "missing_founder",
+      "question": "Şirketin kurucusu kimdir?",
+      "expected_type": "not_found",
+      "required_phrases": [],
+      "acceptable_not_found_phrases": [
+        "bulunmuyor",
+        "yer almıyor",
+        "belirtilmemiştir",
+        "bilgi verilmemektedir"
+      ],
+      "forbidden_phrases": [],
+      "require_citation": false,
+      "forbid_citation": true
+    },
+    {
+      "id": "missing_revenue",
+      "question": "Şirketin yıllık cirosu ne kadardır?",
+      "expected_type": "not_found",
+      "required_phrases": [],
+      "acceptable_not_found_phrases": [
+        "bulunmuyor",
+        "yer almıyor",
+        "belirtilmemiştir",
+        "bilgi verilmemektedir"
+      ],
+      "forbidden_phrases": [],
+      "require_citation": false,
+      "forbid_citation": true
+    },
+    {
+      "id": "missing_approver",
+      "question": "Belgenin onaylayıcısı kimdir?",
+      "expected_type": "not_found",
+      "required_phrases": [],
+      "acceptable_not_found_phrases": [
+        "bulunmuyor",
+        "yer almıyor",
+        "belirtilmemiştir",
+        "bilgi verilmemektedir"
+      ],
+      "forbidden_phrases": [
+        "Bilgi Teknolojileri Direktörlüğü"
+      ],
+      "require_citation": false,
+      "forbid_citation": true
+    }
+  ]
+}
