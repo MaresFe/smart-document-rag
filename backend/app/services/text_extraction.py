@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from time import perf_counter
 
-import fitz
+import pymupdf as fitz
 import pandas as pd
 import pytesseract
 from docx import Document as DocxDocument

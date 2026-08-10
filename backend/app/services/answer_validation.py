@@ -101,8 +101,6 @@ ROLE_RULES: dict[
             "tarafından onaylandı",
             "onayladı",
             "onaylamıştır",
-            "onayıyla",
-            "onayı ile",
         ),
     },
     "sorumlu": {
