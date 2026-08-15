@@ -224,7 +224,7 @@ def test_clean_generated_answer_applies_full_pipeline() -> None:
 
     assert answer == (
         "Bildirim guvenlik@example.com adresine "
-        "gönderilir. [Kaynak 1]"
+        "gönderilir."
     )
 
 
@@ -240,3 +240,65 @@ def test_clean_generated_answer_blocks_unsupported_role() -> None:
         question="Belgenin onaylayıcısı kimdir?",
         retrieved_chunks=chunks,
     ) == answer_validation.FIXED_NOT_FOUND_ANSWER
+
+
+def test_inline_citations_are_removed_without_losing_layout() -> None:
+    answer = (
+        "Akım [Kaynak 1]\n\n"
+        "- Elektrik yüklerinin hareketidir. [1]\n"
+        "- Birimi amperdir. [Kaynak 2]"
+    )
+
+    assert answer_validation.remove_inline_citations(
+        answer,
+    ) == (
+        "Akım\n\n"
+        "- Elektrik yüklerinin hareketidir.\n"
+        "- Birimi amperdir."
+    )
+
+
+def test_markdown_formatting_is_normalized_for_plain_text_ui() -> None:
+    answer = (
+        "### Çalışma Notları\n\n"
+        "* **Akım:** Elektrik yüklerinin hareketidir.\n"
+        "- Formül örneği: 2**3"
+    )
+
+    assert (
+        answer_validation.normalize_plain_text_formatting(
+            answer,
+        )
+        == (
+            "Çalışma Notları\n\n"
+            "- Akım: Elektrik yüklerinin hareketidir.\n"
+            "- Formül örneği: 2**3"
+        )
+    )
+
+def test_parenthesized_inline_citations_are_removed() -> None:
+    answer = (
+        "- Destek bilgileri (Kaynak 1)\n"
+        "- Proje bilgileri (Kaynak 2 ve Kaynak 3)"
+    )
+
+    assert (
+        answer_validation.remove_inline_citations(answer)
+        == (
+            "- Destek bilgileri\n"
+            "- Proje bilgileri"
+        )
+    )
+
+def test_markdown_link_is_reduced_to_visible_text() -> None:
+    answer = (
+        "İletişim: "
+        "[destek@example.com](mailto:destek@example.com)"
+    )
+
+    assert (
+        answer_validation.normalize_plain_text_formatting(
+            answer,
+        )
+        == "İletişim: destek@example.com"
+    )

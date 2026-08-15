@@ -240,3 +240,35 @@ def test_retrieval_clamps_result_limit(
         session.executed_statement._limit_clause.value
         == expected_limit
     )
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("Belgeyi özetler misin?", True),
+        ("Konuları listele.", True),
+        ("Belgeden not çıkar.", True),
+        ("Önemli bilgileri maddeleştir.", True),
+        ("Projenin kodu nedir?", False),
+    ],
+)
+def test_structured_document_request_detection(
+    query: str,
+    expected: bool,
+) -> None:
+    assert (
+        retrieval.is_structured_document_request(query)
+        is expected
+    )
+
+
+def test_evenly_spaced_indexes_cover_entire_document() -> None:
+    assert retrieval.get_evenly_spaced_indexes(
+        total=10,
+        limit=4,
+    ) == [0, 3, 6, 9]
+
+    assert retrieval.get_evenly_spaced_indexes(
+        total=3,
+        limit=10,
+    ) == [0, 1, 2]

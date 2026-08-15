@@ -1,4 +1,5 @@
 import logging
+import re
 from dataclasses import dataclass
 from time import perf_counter
 from uuid import UUID
@@ -27,6 +28,47 @@ class RetrievedChunk:
     content: str
     similarity_score: float
     original_filename: str | None
+
+
+STRUCTURED_REQUEST_PATTERN = re.compile(
+    (
+        r"\b(?:"
+        r"özet\w*|"
+        r"liste\w*|"
+        r"madde\w*|"
+        r"not(?:lar)?\s+(?:çıkar\w*|hazırla\w*)|"
+        r"çalışma\s+not\w*|"
+        r"konu\s+başlık\w*|"
+        r"ana\s+(?:fikir|konu)\w*|"
+        r"önemli\s+(?:bilgi|nokta|kural)\w*"
+        r")\b"
+    ),
+    flags=re.IGNORECASE,
+)
+
+
+def is_structured_document_request(
+    query: str,
+) -> bool:
+    return STRUCTURED_REQUEST_PATTERN.search(
+        query.strip(),
+    ) is not None
+
+
+def get_evenly_spaced_indexes(
+    total: int,
+    limit: int,
+) -> list[int]:
+    if total <= limit:
+        return list(range(total))
+
+    if limit == 1:
+        return [0]
+
+    return [
+        round(index * (total - 1) / (limit - 1))
+        for index in range(limit)
+    ]
 
 
 def count_meaningful_query_characters(
@@ -226,6 +268,137 @@ def retrieve_relevant_chunks(
         rejected_count,
         minimum_similarity,
         top_similarity_text,
+    )
+
+    return results
+
+
+def retrieve_document_overview_chunks(
+    db: Session,
+    query: str,
+    user_id: UUID,
+    limit: int = 10,
+    document_ids: list[UUID] | None = None,
+) -> list[RetrievedChunk]:
+    """Select chunks spread across linked documents.
+
+    Summary, note and list requests are broad. A semantic
+    threshold can reject them even when a document is
+    selected, so this path samples the beginning, middle
+    and end of the selected content.
+    """
+    total_started = perf_counter()
+
+    if document_ids is not None and not document_ids:
+        return []
+
+    safe_limit = min(max(limit, 1), 20)
+    normalized_query = query.strip()
+
+    embedding_started = perf_counter()
+
+    query_embedding = create_query_embedding(
+        normalized_query,
+    )
+
+    embedding_ms = (
+        perf_counter() - embedding_started
+    ) * 1000
+
+    distance = (
+        DocumentChunk.embedding.cosine_distance(
+            query_embedding,
+        )
+    )
+
+    statement = (
+        select(
+            DocumentChunk,
+            Document.original_filename,
+            distance.label("distance"),
+        )
+        .join(
+            Document,
+            Document.id
+            == DocumentChunk.document_id,
+        )
+        .where(
+            Document.user_id == user_id,
+            DocumentChunk.embedding.is_not(None),
+            Document.status == "ready",
+        )
+    )
+
+    if document_ids is not None:
+        statement = statement.where(
+            DocumentChunk.document_id.in_(
+                document_ids,
+            ),
+        )
+
+    statement = statement.order_by(
+        DocumentChunk.document_id,
+        DocumentChunk.chunk_index,
+    )
+
+    database_started = perf_counter()
+    rows = db.execute(statement).all()
+
+    database_ms = (
+        perf_counter() - database_started
+    ) * 1000
+
+    selected_indexes = get_evenly_spaced_indexes(
+        total=len(rows),
+        limit=safe_limit,
+    )
+
+    results: list[RetrievedChunk] = []
+
+    for row_index in selected_indexes:
+        (
+            chunk,
+            original_filename,
+            chunk_distance,
+        ) = rows[row_index]
+
+        similarity_score = max(
+            -1.0,
+            min(
+                1.0,
+                1 - float(chunk_distance),
+            ),
+        )
+
+        results.append(
+            RetrievedChunk(
+                document_id=chunk.document_id,
+                chunk_id=chunk.id,
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                similarity_score=similarity_score,
+                original_filename=(
+                    original_filename
+                ),
+            ),
+        )
+
+    total_ms = (
+        perf_counter() - total_started
+    ) * 1000
+
+    performance_logger.info(
+        "RAG overview retrieval timing | "
+        "embedding_ms=%.2f | "
+        "database_ms=%.2f | "
+        "total_ms=%.2f | "
+        "candidate_count=%d | "
+        "source_count=%d",
+        embedding_ms,
+        database_ms,
+        total_ms,
+        len(rows),
+        len(results),
     )
 
     return results

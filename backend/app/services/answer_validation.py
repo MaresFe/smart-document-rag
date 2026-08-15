@@ -323,6 +323,71 @@ def normalize_citations(answer: str) -> str:
     )
 
 
+def remove_inline_citations(answer: str) -> str:
+    without_citations = CITATION_PATTERN.sub("", answer)
+    without_citations = re.sub(
+        (
+            r"(?i)\(\s*"
+            r"kaynak(?:lar)?\s+\d+"
+            r"(?:\s*(?:[-–,;]|ve)\s*"
+            r"(?:kaynak(?:lar)?\s+)?\d+)*"
+            r"\s*\)"
+        ),
+        "",
+        without_citations,
+    )
+    without_citations = re.sub(
+        r"[ \t]+([,.;:!?])",
+        r"\1",
+        without_citations,
+    )
+    without_citations = re.sub(
+        r"[ \t]{2,}",
+        " ",
+        without_citations,
+    )
+    without_citations = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        without_citations,
+    )
+
+    return "\n".join(
+        line.rstrip()
+        for line in without_citations.splitlines()
+    ).strip()
+
+
+def normalize_plain_text_formatting(
+    answer: str,
+) -> str:
+    cleaned = re.sub(
+        r"(?m)^[ \t]{0,3}#{1,6}[ \t]+",
+        "",
+        answer,
+    )
+
+    cleaned = re.sub(
+        r"(?m)^[ \t]*\*[ \t]+",
+        "- ",
+        cleaned,
+    )
+
+    cleaned = re.sub(
+        r"\[([^\]\n]+)\]\([^\)\n]+\)",
+        r"\1",
+        cleaned,
+    )
+
+    cleaned = re.sub(
+        r"\*\*([^*\n]+)\*\*",
+        r"\1",
+        cleaned,
+    )
+
+    return cleaned
+
+
 def remove_answer_prefix(answer: str) -> str:
     return re.sub(
         r"^(?:Cevap|Yanıt)\s*:\s*",
@@ -777,8 +842,12 @@ def clean_generated_answer(
         cleaned,
     )
 
-    cleaned = normalize_citations(
-        cleaned,
+    cleaned = remove_inline_citations(
+        answer=cleaned,
+    )
+
+    cleaned = normalize_plain_text_formatting(
+        answer=cleaned,
     )
 
     cleaned = remove_false_not_found_suffix(

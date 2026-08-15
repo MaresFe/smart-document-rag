@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3.5:9b"
     ollama_keep_alive: str = "30m"
     llm_timeout_seconds: int = 120
+    llm_context_window: int = Field(default=8192, ge=2048, le=32768)
+    llm_max_output_tokens: int = Field(default=384, ge=64, le=4096)
+    llm_structured_max_output_tokens: int = Field(
+        default=1024,
+        ge=128,
+        le=4096,
+    )
 
     auth_secret_key: SecretStr
     auth_algorithm: str = "HS256"

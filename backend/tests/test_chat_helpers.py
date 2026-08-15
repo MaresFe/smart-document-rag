@@ -31,13 +31,11 @@ def test_retrieval_fallback_without_chunks_returns_fixed_answer() -> None:
     ) == FIXED_NOT_FOUND_ANSWER
 
 
-def test_retrieval_fallback_lists_sources_and_truncates_content() -> None:
-    long_content = "a" * 750
-
+def test_retrieval_fallback_uses_source_panel() -> None:
     answer = build_retrieval_based_answer(
         question="Belge ne anlatıyor?",
         retrieved_chunks=[
-            make_retrieved_chunk(long_content),
+            make_retrieved_chunk("Birinci kaynak"),
             make_retrieved_chunk(
                 "İkinci kaynak",
                 filename=None,
@@ -45,10 +43,11 @@ def test_retrieval_fallback_lists_sources_and_truncates_content() -> None:
         ],
     )
 
-    assert answer.startswith(
-        "Yanıt modeli şu anda kullanılamıyor.",
+    assert answer == (
+        "Yanıt modeli şu anda kullanılamıyor. "
+        "İlgili belge parçalarını Kaynaklar "
+        "panelinden inceleyebilirsiniz."
     )
-    assert "Soru: Belge ne anlatıyor?" in answer
-    assert "[Kaynak 1 - source.txt]" in answer
-    assert f"{'a' * 700}..." in answer
-    assert "[Kaynak 2 - None]\nİkinci kaynak" in answer
+    assert "Belge ne anlatıyor?" not in answer
+    assert "[Kaynak" not in answer
+    assert "Birinci kaynak" not in answer
