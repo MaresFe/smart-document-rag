@@ -40,6 +40,8 @@ from app.services.answer_validation import (
 from app.services.llm import LLMError, generate_answer
 from app.services.retrieval import (
     RetrievedChunk,
+    is_structured_document_request,
+    retrieve_document_overview_chunks,
     retrieve_relevant_chunks,
 )
 
@@ -81,27 +83,10 @@ def build_retrieval_based_answer(
     if not retrieved_chunks:
         return FIXED_NOT_FOUND_ANSWER
 
-    source_sections: list[str] = []
-
-    for index, result in enumerate(
-        retrieved_chunks,
-        start=1,
-    ):
-        content = result.content.strip()
-
-        if len(content) > 700:
-            content = f"{content[:700]}..."
-
-        source_sections.append(
-            f"[Kaynak {index} - "
-            f"{result.original_filename}]\n{content}"
-        )
-
     return (
         "Yanıt modeli şu anda kullanılamıyor. "
-        "Soruyla en alakalı belge parçaları aşağıdadır.\n\n"
-        f"Soru: {question}\n\n"
-        + "\n\n".join(source_sections)
+        "İlgili belge parçalarını Kaynaklar "
+        "panelinden inceleyebilirsiniz."
     )
 
 
@@ -493,15 +478,26 @@ def create_chat_message(
     retrieval_started = perf_counter()
 
     try:
-        retrieved_chunks = (
-            retrieve_relevant_chunks(
+        if is_structured_document_request(
+            normalized_content,
+        ):
+            retrieved_chunks = (
+                retrieve_document_overview_chunks(
+                    db=db,
+                    query=normalized_content,
+                    user_id=current_user.id,
+                    limit=10,
+                    document_ids=linked_document_ids,
+                )
+            )
+        else:
+            retrieved_chunks = retrieve_relevant_chunks(
                 db=db,
                 query=normalized_content,
                 user_id=current_user.id,
                 limit=5,
                 document_ids=linked_document_ids,
             )
-        )
     except EmbeddingError as error:
         retrieval_ms = (
             perf_counter() - retrieval_started

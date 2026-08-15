@@ -157,7 +157,7 @@ def test_generate_answer_sends_deterministic_request_and_cleans_response(
         retrieved_chunks=[make_retrieved_chunk()],
     )
 
-    assert result == "Projenin kodu MAVI-27'dir. [Kaynak 1]"
+    assert result == "Projenin kodu MAVI-27'dir."
     assert captured["url"] == (
         f"{llm.settings.ollama_base_url}/api/generate"
     )
@@ -171,9 +171,12 @@ def test_generate_answer_sends_deterministic_request_and_cleans_response(
     assert payload["stream"] is False
     assert payload["think"] is False
     assert payload["options"] == {
+        "num_ctx": llm.settings.llm_context_window,
         "temperature": 0.0,
         "seed": 42,
-        "num_predict": 180,
+        "num_predict": (
+            llm.settings.llm_max_output_tokens
+        ),
         "repeat_penalty": 1.1,
     }
 
@@ -336,3 +339,31 @@ def test_generate_answer_rejects_unsupported_provider(
             question="Soru",
             retrieved_chunks=[make_retrieved_chunk()],
         )
+
+
+def test_structured_request_uses_expanded_answer_settings() -> None:
+    question = "Belgeyi özetleyip maddeler halinde listele."
+
+    assert llm.get_max_output_tokens(
+        question,
+    ) == llm.settings.llm_structured_max_output_tokens
+
+    instruction = llm.get_answer_format_instruction(
+        question,
+    )
+
+    assert "'- ' ile başlayan kısa maddeler" in instruction
+    assert "ilgili konuları atlama" in instruction
+
+def test_structured_prompt_forbids_false_not_found() -> None:
+    prompt = llm.build_rag_prompt(
+        question=(
+            "Seçili belgeleri ana başlıklar altında özetle."
+        ),
+        retrieved_chunks=[make_retrieved_chunk()],
+    )
+
+    assert "bilgi bulunamadı cevabını verme" in prompt
+    assert "ana konuları ve önemli bilgileri" in prompt
+    assert "Tek paragraf yazma" in prompt
+    assert "Her ana konu için ayrı bir başlık" in prompt
